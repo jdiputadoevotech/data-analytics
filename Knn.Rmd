@@ -1,0 +1,115 @@
+---
+title: "Activity for kNN and CART"
+author: "Your Name"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+# This chunk stays hidden (include=FALSE) just to load libraries
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+# Check and install missing packages
+required_packages <- c("ggplot2", "caret", "class", "rpart", "rpart.plot", "titanic", "e1071", "cluster", "factoextra")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[,"Package"])]
+if(length(new_packages)) install.packages(new_packages)
+
+# Load libraries
+library(ggplot2)
+library(caret)
+library(class)
+library(rpart)
+library(rpart.plot)
+library(titanic)
+library(cluster)     # For clustering
+library(factoextra)  # For beautiful cluster visualization
+```
+```{r}
+# Load and clean data [cite: 1248, 1251]
+data("titanic_train")
+titanic <- titanic_train[, c("Survived", "Pclass", "Sex", "Age", "Fare")]
+titanic <- na.omit(titanic)
+
+# Factorize categorical variables [cite: 1269]
+titanic$Survived <- factor(titanic$Survived, levels = c(0, 1), labels = c("Died", "Survived"))
+titanic$Sex <- factor(titanic$Sex)
+
+# Split data into training (70%) and testing (30%) sets [cite: 54, 57]
+set.seed(123) 
+train_index <- createDataPartition(titanic$Survived, p = 0.7, list = FALSE)
+train_data <- titanic[train_index, ]
+test_data  <- titanic[-train_index, ]
+
+# Confirm data load
+head(train_data)
+summary(train_data)
+```
+```{r}
+# Create copies for scaling [cite: 64]
+train_scaled <- train_data
+test_scaled <- test_data
+
+# Scale numeric features 
+num_cols <- c("Pclass", "Age", "Fare")
+preProc <- preProcess(train_data[, num_cols], method = c("center", "scale"))
+train_scaled[, num_cols] <- predict(preProc, train_data[, num_cols])
+test_scaled[, num_cols] <- predict(preProc, test_data[, num_cols])
+
+# Convert Sex to numeric for distance calculation
+train_scaled$Sex <- as.numeric(train_scaled$Sex)
+test_scaled$Sex <- as.numeric(test_scaled$Sex)
+
+# Apply kNN with k=3 [cite: 71, 72]
+knn_result <- knn(train = train_scaled[, -1], 
+                  test = test_scaled[, -1], 
+                  cl = train_scaled$Survived, 
+                  k = 3)
+
+# Build and display the Confusion Matrix [cite: 100, 115]
+knn_cm <- confusionMatrix(knn_result, test_scaled$Survived)
+print(knn_cm)
+```
+```{r}
+# Build the CART model [cite: 769, 780]
+cart_model <- rpart(Survived ~ Pclass + Sex + Age + Fare, 
+                    data = train_data, 
+                    method = "class")
+
+# Plot the tree visually [cite: 11, 954, 966]
+rpart.plot(cart_model, main = "Titanic Survival Tree", type = 2)
+
+# Predict on test data [cite: 1028, 1032]
+cart_pred <- predict(cart_model, test_data, type = "class")
+
+# Build and display the Confusion Matrix [cite: 112, 116]
+cart_cm <- confusionMatrix(cart_pred, test_data$Survived)
+print(cart_cm)
+```
+```{r}
+# Prepare data for clustering (only numeric columns, must be scaled)
+cluster_data <- titanic[, c("Pclass", "Age", "Fare")]
+cluster_scaled <- scale(cluster_data)
+
+# Find optimal number of clusters using the Elbow Method
+fviz_nbclust(cluster_scaled, kmeans, method = "wss") +
+  labs(subtitle = "Elbow method to find optimal k")
+
+# Run k-Means with 3 clusters (as an example)
+set.seed(123)
+km_result <- kmeans(cluster_scaled, centers = 4, nstart = 25)
+
+# View the cluster sizes and centers
+print(km_result)
+
+# Visualize the clusters
+fviz_cluster(km_result, data = cluster_scaled,
+             palette = "jco",
+             geom = "point",
+             ellipse.type = "convex", 
+             ggtheme = theme_minimal(),
+             main = "Titanic Passenger Clusters")
+
+# Add cluster labels back to the original data to see groupings
+titanic$Cluster <- as.factor(km_result$cluster)
+head(titanic)
+```

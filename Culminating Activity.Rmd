@@ -1,0 +1,360 @@
+---
+title: "Predicting Activity Type and Running Performance from Strava Wearable-Tracker Data: A Supervised Learning Approach Using kNN, CART, and Linear Regression"
+author: "Your Names"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+# Abstract
+
+This study applies supervised machine-learning techniques to a personal Strava activity log of 105 records to (1) classify the *type* of athletic activity (Run, Walk, Hike, Workout) and (2) predict the *average speed* of running activities. Distance, moving time, elapsed time, total elevation gain, and engagement metrics (kudos, achievements, athlete count) serve as predictors. k-Nearest Neighbors (kNN) and Classification and Regression Trees (CART) are used for the classification task, while multiple linear regression and regression-tree models are used for the speed-prediction task. Models are trained on a 70/30 stratified split, with numeric predictors centered and scaled. Performance is evaluated using accuracy, sensitivity, specificity, and the confusion matrix for classification, and using R-squared, RMSE, and MAE for regression. Results are expected to confirm that distance and elevation gain are the strongest predictors of both activity type and running speed, and that CART provides interpretable decision rules suitable for fitness-application logic. Findings inform recommender features for self-tracking athletes and demonstrate the applicability of basic supervised learning to small wearable datasets.
+
+# Chapter 1: Introduction
+
+## 1.1 Background of the Study
+
+Wearable fitness trackers and GPS-based activity platforms such as **Strava, Garmin Connect, Nike Run Club,** and **Apple Fitness** have transformed how individuals record and reflect on athletic activity. Each session captures dozens of telemetry features — distance, pace, elevation, moving time, geolocation, and social-engagement metrics — producing data streams that were previously available only to elite athletes with laboratory access. Globally, Strava reports more than 135 million users who collectively upload tens of millions of activities per week, making personal activity logs one of the largest sources of human-movement data in the world.
+
+This abundance of data creates an opportunity for **predictive analytics**. Two questions are particularly relevant for both end-users and developers of fitness applications. First, can the *type* of activity (e.g., Run versus Walk versus Hike) be inferred from telemetry alone, without relying on the user's manual label? Automatic classification underlies features such as auto-pause, auto-detection of workouts, and personalized training feedback. Second, what factors *drive performance*, operationalized here as the average speed achieved during a run? Understanding the relative contribution of distance, terrain (elevation gain), and effort duration helps athletes plan training, set realistic pace goals, and recognise the trade-off between distance and pace.
+
+The present study uses a personal Strava export (105 activities, December 2022 – December 2023, predominantly New York City) to demonstrate how introductory supervised-learning techniques — **k-Nearest Neighbors (kNN), Classification and Regression Trees (CART)**, and **multiple linear regression** — can answer both questions. The work follows the supervised-learning workflow taught in Chapters 4 and 5 of the course: data partitioning, preprocessing/scaling, model fitting, prediction, and confusion-matrix or error-metric evaluation.
+
+## 1.2 Statement of the Problem
+
+The general problem this study addresses is: *To what extent can simple supervised-learning algorithms accurately predict activity type and running performance from Strava telemetry?*
+
+Specifically, the study seeks to answer:
+
+1. What are the descriptive characteristics (central tendency, dispersion, distributional shape) of distance, moving time, elevation gain, average speed, and max speed across the 105 logged activities?
+2. Is there a statistically significant relationship between **total elevation gain** and **average speed** in running activities?
+3. How accurately can a **kNN classifier** predict the activity type (Run, Walk, Hike, Workout) given distance, moving time, elevation gain, average speed, and max speed?
+4. How accurately can a **CART (decision-tree) classifier** predict activity type using the same predictors, and what split rules does it learn?
+5. How well can **multiple linear regression** and a **regression tree** predict the average running speed from distance, elevation gain, moving time, and athlete count, and which predictors are most influential?
+6. Which model — kNN, CART, or linear regression — performs best for its respective task, based on accuracy / RMSE on a held-out test set?
+
+## 1.3 Objectives of the Study
+
+### General Objective
+
+To develop, evaluate, and compare supervised machine-learning models that classify athletic activity type and predict average running speed using a Strava activity dataset.
+
+### Specific Objectives
+
+1. **To describe** the dataset using descriptive statistics and exploratory visualisations (histograms, box-plots, scatter plots, correlation heat-map).
+2. **To preprocess** the data by handling missing values, removing zero-distance records, encoding the activity-type factor, and centering/scaling numeric predictors.
+3. **To partition** the data into training (70%) and testing (30%) subsets using stratified sampling on activity type.
+4. **To build and evaluate** a kNN classifier for activity type, tuning *k* via cross-validation and reporting accuracy, sensitivity, specificity, and Cohen's kappa.
+5. **To build and visualise** a CART decision-tree classifier for activity type and interpret its split rules.
+6. **To build and evaluate** a multiple linear-regression model and a regression-tree (rpart, method = "anova") for predicting average running speed; report R-squared, adjusted R-squared, RMSE, and MAE.
+7. **To compare** the predictive performance of the candidate models for each task and recommend the better-performing approach.
+
+## 1.4 Hypotheses
+
+For Specific Objective 2 (relationship between elevation and speed):
+
+- $H_{01}$: There is no significant linear relationship between total elevation gain and average speed in running activities ($\beta = 0$).
+- $H_{11}$: There is a significant negative linear relationship between total elevation gain and average speed ($\beta < 0$).
+
+For Specific Objective 6 (model comparison – classification):
+
+- $H_{02}$: kNN and CART achieve equal classification accuracy in predicting activity type.
+- $H_{12}$: kNN and CART differ significantly in classification accuracy.
+
+For Specific Objective 6 (model comparison – regression):
+
+- $H_{03}$: Multiple linear regression and the regression tree achieve equal RMSE in predicting average running speed.
+- $H_{13}$: The two regression methods differ significantly in RMSE.
+
+All hypotheses are evaluated at the $\alpha = 0.05$ level of significance.
+
+## 1.5 Significance of the Study
+
+- **Self-tracking athletes** benefit from understanding which factors most influence their pace, helping them set realistic goals and plan training routes.
+- **Fitness-application developers** gain insight into how lightweight ML models (kNN, CART) can power activity auto-detection and personalised feedback even on small per-user datasets.
+- **Coaches and physical-education instructors** can use the descriptive findings to discuss the trade-off between elevation, distance, and pace.
+- **Predictive-analytics students and educators** receive a worked, end-to-end example of the supervised-learning pipeline (split → preprocess → train → predict → evaluate) applied to a real, messy, real-world dataset rather than a textbook one.
+- **Future researchers** can extend the methodology to larger multi-athlete Strava corpora, longitudinal training-load studies, or models that incorporate weather, heart-rate, and cadence data.
+
+## 1.6 Scope and Limitations
+
+**Scope.** The study is limited to one athlete's public Strava export covering **105 activities recorded between December 2022 and December 2023**, primarily in New York City (with a small number of activities in other US locations). Variables analysed are restricted to those present in the export: date, type/sport_type, distance (m), moving_time (s), elapsed_time (s), total_elevation_gain (m), start/end coordinates, average_speed (m/s), max_speed (m/s), and engagement counts (achievement, kudos, comment, athlete, photo). Models are limited to **kNN, CART, and multiple linear regression** as covered in Chapters 4 and 5.
+
+**Limitations.**
+
+1. **Single-athlete data** — findings cannot be generalised to other runners with different fitness levels, ages, or training programmes.
+2. **Class imbalance** — the dataset is dominated by Runs (~80%), with very few Walk, Hike, and Workout records, which limits the reliability of multiclass classification metrics.
+3. **No physiological covariates** — heart-rate, cadence, weather, surface type, and shoe model are not in the export, so unexplained variance in speed will be substantial.
+4. **One zero-distance / outlier record** (a Tennis "Workout" with 0 m and a Run with `elapsed_time = 62993 s`) is excluded from speed modelling.
+5. **Small sample size (n = 105)** restricts model complexity; deep trees and high-k kNN are avoided to prevent overfitting.
+
+# Chapter 2: Review of Related Literature
+
+> This chapter is to be written by the researchers. The five suggested article clusters below should guide the search.
+
+## 2.1 Suggested Article Clusters
+
+1. **Strava and self-tracking studies** — to justify the dataset and frame the social/behavioural context. *Search keywords: "Strava data analysis", "quantified self", "social fitness platform", "running motivation kudos", "GPS activity logging".*
+2. **Wearable-device / fitness-tracker analytics** — to ground the variables (distance, speed, elevation, HR proxies). *Search keywords: "wearable fitness tracker accuracy", "GPS running data", "activity recognition smartphone", "consumer wearable validation".*
+3. **Running biomechanics and the elevation–pace trade-off** — to support hypothesis $H_{11}$ (negative effect of elevation on speed). *Search keywords: "hill running pace", "elevation gain running performance", "grade-adjusted pace", "running economy gradient".*
+4. **Activity-type classification with machine learning** — to justify the kNN/CART classification approach. *Search keywords: "human activity recognition kNN", "decision tree activity classification", "accelerometer activity recognition", "sport classification GPS".*
+5. **Predictive modelling of athletic performance** — to support the regression objective. *Search keywords: "marathon time prediction regression", "running pace prediction machine learning", "CART sport science", "endurance performance prediction".*
+
+For each article you read, write 2–3 sentences capturing (a) what they studied, (b) what method they used, and (c) how their finding relates to *your* objective. Aim for 8–12 articles total.
+
+## 2.2 Related Studies
+
+*Summarize previous empirical research here.*
+
+## 2.3 Related Literature
+
+*Discuss the underlying theories and concepts (e.g., supervised learning theory, distance metrics for kNN, recursive partitioning for CART, ordinary-least-squares assumptions).*
+
+## 2.4 Conceptual Framework
+
+```
+[ Independent Variables ]                       [ Dependent Variables ]
+distance, moving_time,           +--- kNN / CART --------> Activity Type (categorical)
+elapsed_time, elevation_gain,    |
+max_speed, athlete_count   ------+
+                                 +--- Lin. Reg. / Reg.Tree --> Average Speed (numeric)
+```
+
+```{r conceptual-framework, echo=FALSE}
+# A simple visual placeholder; replace with a proper diagram if desired.
+plot.new()
+title("Conceptual Framework: Predictors -> Models -> Outcomes")
+text(0.5, 0.7,
+     "distance, moving_time, elapsed_time,\nelevation_gain, max_speed, athlete_count",
+     cex = 0.9)
+arrows(0.5, 0.6, 0.3, 0.4); arrows(0.5, 0.6, 0.7, 0.4)
+text(0.3, 0.35, "kNN / CART", cex = 0.9, font = 2)
+text(0.7, 0.35, "Lin. Reg. / Reg.Tree", cex = 0.9, font = 2)
+arrows(0.3, 0.30, 0.3, 0.15); arrows(0.7, 0.30, 0.7, 0.15)
+text(0.3, 0.10, "Activity Type", cex = 0.9)
+text(0.7, 0.10, "Average Speed", cex = 0.9)
+```
+
+# Chapter 3: Methodology
+
+## 3.1 Research Design
+
+This study employs a **quantitative, predictive (correlational-and-comparative) research design**. It is *quantitative* because all variables are numerical or categorical with finite levels; it is *predictive* because the primary aim is to forecast unseen outcomes (activity type, average speed) rather than merely describe; and it is *comparative* because two algorithms are pitted against each other for each task (kNN vs. CART for classification, multiple linear regression vs. regression tree for speed prediction).
+
+## 3.2 Data Collection
+
+The dataset was obtained from a public **Strava** athlete export, distributed via Kaggle as `Strava Running Data.csv`. It contains **105 activity records** logged between **9 December 2022 and 9 December 2023**, with each row representing one recorded session.
+
+```{r load-data}
+library(tidyverse)
+strava <- read.csv("Strava Running Data.csv", stringsAsFactors = FALSE)
+dim(strava)
+glimpse(strava)
+```
+
+## 3.3 Variables Description
+
+| Role | Variable | Type | Unit | Description |
+|---|---|---|---|---|
+| ID | `Sr..no.` | integer | – | Activity row identifier |
+| Date | `start_date_local` | datetime | ISO-8601 | Activity start time, athlete's local TZ |
+| **Target (Classification)** | `type` / `sport_type` | factor | – | Run, Walk, Hike, Workout (Tennis) |
+| **Target (Regression)** | `average_speed` | numeric | m/s | Mean speed during moving time |
+| Predictor | `distance` | numeric | m | Total distance covered |
+| Predictor | `moving_time` | numeric | s | Time actually moving |
+| Predictor | `elapsed_time` | numeric | s | Total elapsed clock time |
+| Predictor | `total_elevation_gain` | numeric | m | Cumulative climb |
+| Predictor | `max_speed` | numeric | m/s | Peak speed during activity |
+| Engagement | `achievement_count`, `kudos_count`, `comment_count`, `athlete_count`, `photo_count` | integer | – | Social/engagement metrics |
+| Geo (descriptive only) | `start_latlng`, `end_latlng`, `timezone` | text | – | Location and TZ |
+
+**Derived variables** that will be created during preprocessing:
+
+- `pace_min_per_km = (moving_time/60) / (distance/1000)` — easier to interpret than m/s for runners.
+- `is_run = factor(type == "Run")` — for an optional binary classification version, used to address class imbalance.
+- `month`, `weekday` — extracted from `start_date_local` for descriptive plots only.
+
+## 3.4 Data Preprocessing
+
+Before modelling, a data-fitness diagnostic is run (see Appendix A: `data_fitness_check.R`) to confirm that the dataset is suitable for kNN and CART. The diagnostic verifies sample size, missingness, class balance, near-zero variance, multicollinearity, predictor scale ratios, skewness, outliers, and predictor-target signal strength.
+
+```{r preprocess}
+library(caret)
+
+# 1. Drop rows with distance == 0 (e.g., the Tennis "Workout" row)
+strava <- strava %>% filter(distance > 0)
+
+# 2. Drop the obviously-erroneous elapsed_time outlier
+#    (62 993 s for a 1 304 m run is logging noise, not signal)
+strava <- strava %>% filter(elapsed_time < 30000)
+
+# 3. Convert types
+strava$type       <- factor(strava$type)
+strava$sport_type <- factor(strava$sport_type)
+
+# 4. Keep modelling variables only
+model_df <- strava %>%
+  select(type, distance, moving_time, elapsed_time,
+         total_elevation_gain, average_speed, max_speed,
+         athlete_count)
+
+dim(model_df)
+```
+
+## 3.5 Train–Test Split
+
+```{r split}
+set.seed(123)
+idx       <- createDataPartition(model_df$type, p = 0.7, list = FALSE)
+train_set <- model_df[idx, ]
+test_set  <- model_df[-idx, ]
+
+cat("Train rows:", nrow(train_set), " Test rows:", nrow(test_set), "\n")
+```
+
+## 3.6 Data Analysis Techniques
+
+### 3.6.1 Descriptive Statistics
+
+Functions `summary()` and `psych::describe()` will report mean, SD, median, IQR, skewness, and kurtosis for every numeric variable. Visualisations include histograms, box-plots faceted by `type`, scatter plots of distance-vs-speed and elevation-vs-speed, and a Pearson correlation heat-map produced with `corrplot`.
+
+### 3.6.2 Inferential Statistics
+
+- **Pearson correlation** between `total_elevation_gain` and `average_speed` (runs only) tests $H_{01}$.
+- A **simple linear regression** of `average_speed ~ total_elevation_gain` is reported alongside the correlation.
+- **McNemar's test** is applied to the test-set predictions of kNN vs. CART for $H_{02}$.
+- A **paired t-test** on absolute residuals of the linear regression vs. the regression tree tests $H_{03}$.
+
+### 3.6.3 Supervised Machine-Learning Models
+
+**A. kNN Classifier (Activity Type)**
+
+```{r knn}
+library(class)
+num_cols <- c("distance","moving_time","elapsed_time",
+              "total_elevation_gain","average_speed","max_speed",
+              "athlete_count")
+preProc  <- preProcess(train_set[, num_cols], method = c("center","scale"))
+train_s  <- predict(preProc, train_set[, num_cols])
+test_s   <- predict(preProc, test_set[, num_cols])
+
+# Tune k via 10-fold cross-validation
+ctrl <- trainControl(method = "cv", number = 10)
+knn_tune <- train(x = train_s, y = train_set$type,
+                  method = "knn", trControl = ctrl,
+                  tuneGrid = expand.grid(k = seq(1, 15, 2)))
+knn_pred <- predict(knn_tune, test_s)
+confusionMatrix(knn_pred, test_set$type)
+```
+
+**B. CART Classifier (Activity Type)**
+
+```{r cart-class}
+library(rpart); library(rpart.plot)
+cart_cls <- rpart(type ~ distance + moving_time + elapsed_time +
+                  total_elevation_gain + average_speed + max_speed +
+                  athlete_count,
+                  data = train_set, method = "class")
+rpart.plot(cart_cls, type = 2, extra = 104,
+           main = "CART: Activity-Type Classification Tree")
+cart_pred <- predict(cart_cls, test_set, type = "class")
+confusionMatrix(cart_pred, test_set$type)
+```
+
+**C. Multiple Linear Regression (Average Speed, Runs only)**
+
+```{r lm}
+runs <- model_df %>% filter(type == "Run")
+set.seed(123)
+ridx    <- createDataPartition(runs$average_speed, p = 0.7, list = FALSE)
+r_train <- runs[ridx, ]
+r_test  <- runs[-ridx, ]
+
+lm_fit <- lm(average_speed ~ distance + moving_time +
+             total_elevation_gain + athlete_count, data = r_train)
+summary(lm_fit)
+lm_pred <- predict(lm_fit, r_test)
+postResample(lm_pred, r_test$average_speed)   # RMSE, R^2, MAE
+```
+
+**D. Regression Tree (Average Speed, Runs only)**
+
+```{r rtree}
+rt_fit  <- rpart(average_speed ~ distance + moving_time +
+                 total_elevation_gain + athlete_count,
+                 data = r_train, method = "anova")
+rpart.plot(rt_fit, type = 2,
+           main = "Regression Tree: Predicting Average Running Speed")
+rt_pred <- predict(rt_fit, r_test)
+postResample(rt_pred, r_test$average_speed)
+```
+
+### 3.6.4 Model-Evaluation Metrics
+
+| Task | Metric | Tool / Function |
+|---|---|---|
+| Classification | Accuracy, Sensitivity, Specificity, Kappa | `caret::confusionMatrix()` |
+| Classification | Class-imbalance-robust comparison | McNemar's test |
+| Regression | R-squared, RMSE, MAE | `caret::postResample()` |
+| Regression | Residual normality / homoscedasticity | `plot(lm_fit)` diagnostics |
+
+### 3.6.5 Software and Reproducibility
+
+All analysis is performed in **R 4.x** within **RStudio** using **R Markdown**. Required packages: `tidyverse`, `caret`, `class`, `rpart`, `rpart.plot`, `corrplot`, `psych`, `e1071`, `ggplot2`. The random seed `set.seed(123)` is fixed for every train/test split and CV resample to ensure reproducibility.
+
+# Chapter 4: Results and Discussion
+
+> *Placeholder — to be completed after running the analysis.*
+
+## 4.1 Descriptive Statistics
+
+```{r}
+# library(psych); describe(model_df)
+# summary(model_df)
+```
+
+## 4.2 Visualisation
+
+```{r}
+library(ggplot2)
+# ggplot(model_df, aes(x = total_elevation_gain, y = average_speed, color = type)) +
+#   geom_point() + theme_minimal() +
+#   labs(title = "Elevation Gain vs. Average Speed by Activity Type")
+```
+
+## 4.3 Model Results and Interpretation
+
+*Discuss confusion-matrix results, k tuning, tree splits, regression coefficients, and which model wins each task.*
+
+# Chapter 5: Conclusion and Recommendations
+
+## 5.1 Conclusion
+
+*Summarize key findings against each Specific Objective and each hypothesis decision.*
+
+## 5.2 Recommendations
+
+*Practical suggestions for athletes, app developers, and future researchers.*
+
+# References
+
+*Use APA 7 format. Cite the Strava export, the R packages used (`citation("caret")`, `citation("rpart")`, etc.), and the 8–12 articles from your literature review.*
+
+# Appendices
+
+## Appendix A: Data-Fitness Diagnostic Script
+
+The script `data_fitness_check.R` (provided alongside this report) verifies that the dataset is fit for kNN and CART before modelling. It produces a PASS / WARN / FAIL summary matrix covering sample size, missingness, class balance, near-zero variance, multicollinearity, predictor scaling, skewness, outliers, regression-target signal strength, and the kNN dimensionality rule-of-thumb ($n \geq 10p$).
+
+To run it:
+
+```{r data-fitness, eval=FALSE}
+source("data_fitness_check.R")
+```
+
+## Appendix B: Full Code
+
+*(All chunks above are included by `echo = TRUE` in the global setup.)*
