@@ -11,8 +11,6 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 # Abstract
 
-This study applies supervised machine-learning techniques to a personal Strava activity log of 105 records to (1) classify the *type* of athletic activity (Run, Walk, Hike, Workout) and (2) predict the *average speed* of running activities. Distance, moving time, elapsed time, total elevation gain, and engagement metrics (kudos, achievements, athlete count) serve as predictors. k-Nearest Neighbors (kNN) and Classification and Regression Trees (CART) are used for the classification task, while multiple linear regression and regression-tree models are used for the speed-prediction task. Models are trained on a 70/30 stratified split, with numeric predictors centered and scaled. Performance is evaluated using accuracy, sensitivity, specificity, and the confusion matrix for classification, and using R-squared, RMSE, and MAE for regression. Results are expected to confirm that distance and elevation gain are the strongest predictors of both activity type and running speed, and that CART provides interpretable decision rules suitable for fitness-application logic. Findings inform recommender features for self-tracking athletes and demonstrate the applicability of basic supervised learning to small wearable datasets.
-
 # Chapter 1: Introduction
 
 ## 1.1 Background of the Study
@@ -150,7 +148,10 @@ The dataset was obtained from a public **Strava** athlete export, distributed vi
 
 ```{r load-data}
 library(tidyverse)
-strava <- read.csv("Strava Running Data.csv", stringsAsFactors = FALSE)
+# use here() to locate the dataset reliably when knitting from a different wd
+if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
+library(here)
+strava <- read.csv(here::here("Strava Running Data.csv"), stringsAsFactors = FALSE)
 dim(strava)
 glimpse(strava)
 ```

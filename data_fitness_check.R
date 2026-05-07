@@ -12,9 +12,13 @@ required <- c("dplyr", "psych", "corrplot", "caret", "e1071")
 new_pkgs <- required[!(required %in% installed.packages()[, "Package"])]
 if (length(new_pkgs)) install.packages(new_pkgs)
 invisible(lapply(required, library, character.only = TRUE))
+# use here() to reliably locate the dataset without changing the working dir
+if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
+library(here)
 
 # 1. Load -------------------------------------------------------------------
-strava <- read.csv("Strava Running Data.csv", stringsAsFactors = FALSE)
+# read the dataset using a project-root relative path via here()
+strava <- read.csv(here::here("Strava Running Data.csv"), stringsAsFactors = FALSE)
 cat("Raw rows:", nrow(strava), " Cols:", ncol(strava), "\n\n")
 
 # 2. Define modelling variables --------------------------------------------
