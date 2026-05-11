@@ -1,0 +1,969 @@
+---
+title: "kNN Analysis Dashboard Website"
+author: "Matt G. Cabarrubias, Matthew Angelo Lumayno, Jeane Diputado, Janritch Diputado"
+date: "2026-04-06"
+output:
+  html_document:
+    theme: null
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+required_packages <- c("shiny", "bslib", "ggplot2", "caret", "class", "titanic", "plotly", "DT", "scales")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
+if (length(new_packages)) install.packages(new_packages)
+
+library(shiny)
+library(bslib)
+library(ggplot2)
+library(caret)
+library(class)
+library(titanic)
+library(plotly)
+library(DT)
+library(scales)
+
+set.seed(123)
+data("titanic_train")
+
+raw_data <- titanic_train[, c("Survived", "Pclass", "Sex", "Age", "Fare")]
+
+cleaned_data <- na.omit(raw_data)
+
+titanic <- cleaned_data
+titanic$Survived <- factor(titanic$Survived, levels = c(0, 1), labels = c("Died", "Survived"))
+titanic$Sex <- factor(titanic$Sex)
+
+train_index <- createDataPartition(titanic$Survived, p = 0.7, list = FALSE)
+train_data <- titanic[train_index, ]
+test_data <- titanic[-train_index, ]
+
+num_cols <- c("Pclass", "Age", "Fare")
+pre_proc <- preProcess(train_data[, num_cols], method = c("center", "scale"))
+
+build_features <- function(df, scaled = TRUE) {
+  feature_df <- df[, c("Pclass", "Sex", "Age", "Fare")]
+  if (scaled) {
+    feature_df[, num_cols] <- predict(pre_proc, feature_df[, num_cols])
+  }
+  feature_df$Sex <- as.numeric(feature_df$Sex)
+  feature_df
+}
+
+train_x_scaled <- build_features(train_data, scaled = TRUE)
+test_x_scaled <- build_features(test_data, scaled = TRUE)
+train_x_unscaled <- build_features(train_data, scaled = FALSE)
+test_x_unscaled <- build_features(test_data, scaled = FALSE)
+
+evaluate_knn <- function(k, mode) {
+  train_x <- if (mode == "scaled") train_x_scaled else train_x_unscaled
+  test_x <- if (mode == "scaled") test_x_scaled else test_x_unscaled
+
+  pred <- knn(train = train_x, test = test_x, cl = train_data$Survived, k = k)
+  cm <- confusionMatrix(pred, test_data$Survived)
+
+  list(
+    accuracy = as.numeric(cm$overall["Accuracy"]),
+    sensitivity = as.numeric(cm$byClass["Sensitivity"]),
+    specificity = as.numeric(cm$byClass["Specificity"]),
+    cm_table = as.data.frame.matrix(cm$table),
+    truth_pred = data.frame(
+      Actual = test_data$Survived,
+      Predicted = pred,
+      Match = ifelse(pred == test_data$Survived, "Correct", "Incorrect")
+    )
+  )
+}
+
+k_values <- seq(1, 35, by = 2)
+scaled_acc <- sapply(k_values, function(k) evaluate_knn(k, "scaled")$accuracy)
+unscaled_acc <- sapply(k_values, function(k) evaluate_knn(k, "unscaled")$accuracy)
+
+accuracy_curve <- rbind(
+  data.frame(k = k_values, accuracy = scaled_acc, mode = "Scaled"),
+  data.frame(k = k_values, accuracy = unscaled_acc, mode = "Unscaled")
+)
+
+feature_range <- data.frame(
+  Feature = num_cols,
+  Raw = sapply(train_data[, num_cols], function(x) diff(range(x))),
+  Scaled = sapply(train_x_scaled[, num_cols], function(x) diff(range(x)))
+)
+
+partition_summary <- data.frame(
+  Split = c("Train", "Test", "Total (Cleaned)"),
+  Rows = c(nrow(train_data), nrow(test_data), nrow(cleaned_data)),
+  Percent = c(
+    100 * nrow(train_data) / nrow(cleaned_data),
+    100 * nrow(test_data) / nrow(cleaned_data),
+    100
+  )
+)
+
+scaled_display <- cleaned_data
+scaled_display[, num_cols] <- predict(pre_proc, cleaned_data[, num_cols])
+
+unscaled_display <- cleaned_data
+```
+
+```{r styles, results='asis'}
+cat("<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Space+Grotesk:wght@500;700&display=swap');
+
+:root {
+  --bg: #f1f3f5;
+  --surface: #ffffff;
+  --surface-soft: #f8fafc;
+  --ink: #1f2937;
+  --ink-soft: #6b7280;
+  --brand: #0f766e;
+  --brand-dark: #0a4f4a;
+  --stroke: #e5e7eb;
+  --radius: 18px;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Space Grotesk', sans-serif;
+  letter-spacing: -0.015em;
+}
+
+.title,
+.author,
+.date {
+  display: none;
+}
+
+.site-wrap {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 1.2rem;
+}
+
+.app-shell {
+  background: var(--surface-soft);
+  border: 1px solid var(--stroke);
+  border-radius: 22px;
+  padding: 0.9rem;
+  box-shadow: 0 22px 40px rgba(17, 24, 39, 0.08);
+}
+
+.app-grid {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  gap: 0.8rem;
+}
+
+.sidebar-shell {
+  position: sticky;
+  top: 10px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  color: var(--ink);
+  padding: 1rem;
+  min-height: calc(100vh - 64px);
+}
+
+.sidebar-head {
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--stroke);
+  margin-bottom: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.sidebar-head h3 {
+  margin: 0;
+  font-size: 1.02rem;
+}
+
+.sidebar-head p {
+  margin: 0.1rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+}
+
+.brand-dot {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: linear-gradient(140deg, #10b981 0%, #0f766e 100%);
+}
+
+.menu-label {
+  margin: 0 0 0.4rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.sidebar-shell .form-group > label {
+  display: none;
+}
+
+.sidebar-shell .radio {
+  margin: 0;
+}
+
+.sidebar-shell .radio label {
+  display: block;
+  border-radius: 10px;
+  padding: 0.55rem 0.65rem;
+  color: var(--ink);
+  transition: background-color 0.2s ease;
+}
+
+.sidebar-shell .radio label:hover {
+  background: #eef2f7;
+}
+
+.sidebar-shell .radio input[type='radio'] {
+  margin-top: 0;
+}
+
+.main-shell {
+  min-width: 0;
+}
+
+.topbar {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 0.6rem 0.8rem;
+  margin-bottom: 0.8rem;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.profile-chip {
+  background: #ffffff;
+  border: 1px solid var(--stroke);
+  border-radius: 999px;
+  padding: 0.35rem 0.8rem;
+  font-size: 0.86rem;
+}
+
+#scale_mode .radio {
+  margin: 0 0 0.65rem 0;
+}
+
+#scale_mode > label.control-label {
+  display: block;
+  margin-bottom: 0.45rem;
+  line-height: 1.25;
+}
+
+#scale_mode .shiny-options-group {
+  margin-top: 0.15rem;
+}
+
+#scale_mode .radio label {
+  line-height: 1.35;
+  padding-left: 1.45rem;
+}
+
+#scale_mode .radio input[type='radio'] {
+  margin-top: 0.2rem;
+  margin-left: -1.35rem;
+}
+
+.hero {
+  border-radius: var(--radius);
+  border: 1px solid var(--stroke);
+  background: linear-gradient(130deg, #f0fdf4 0%, #ecfdf5 30%, #ffffff 100%);
+  color: var(--ink);
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 0.9rem;
+}
+
+.hero h2 {
+  margin: 0 0 0.2rem;
+  font-size: clamp(1.25rem, 2.2vw, 1.9rem);
+}
+
+.hero p {
+  margin: 0;
+  color: var(--ink-soft);
+}
+
+.web-card {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 1rem 1rem 0.95rem;
+  margin-bottom: 0.8rem;
+}
+
+.control-grid {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr;
+  gap: 1rem;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 0.65rem;
+}
+
+.kpi-card {
+  background: #f9fafb;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  padding: 0.75rem;
+}
+
+.kpi-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.kpi-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #111827;
+  margin: 0.2rem 0 0;
+}
+
+.cm-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  margin-bottom: 0.6rem;
+}
+
+.cm-pill {
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  padding: 0.55rem 0.65rem;
+  background: #f9fafb;
+}
+
+.cm-pill-title {
+  margin: 0;
+  font-size: 0.73rem;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cm-pill-value {
+  margin: 0.15rem 0 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #111827;
+}
+
+.layout-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 0.8rem;
+}
+
+.stack-grid {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 0.8rem;
+}
+
+.predict-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.predict-result {
+  border: 1px solid var(--stroke);
+  border-radius: 12px;
+  background: #f9fafb;
+  padding: 0.65rem 0.75rem;
+  margin-bottom: 0.6rem;
+}
+
+.predict-result p {
+  margin: 0;
+}
+
+.predict-main {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #111827;
+}
+
+.predict-sub {
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.insight-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
+.insight-card {
+  background: #f9fafb;
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 0.9rem;
+  min-height: 180px;
+}
+
+.insight-card h4 {
+  margin: 0 0 0.3rem;
+  color: #111827;
+  font-size: 1rem;
+}
+
+.insight-card p {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.form-group > label {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.help-block {
+  color: var(--ink-soft);
+}
+
+.footer-note {
+  text-align: center;
+  color: var(--ink-soft);
+  font-size: 0.85rem;
+  margin-top: 0.2rem;
+}
+
+.web-card .shiny-options-group {
+  margin-bottom: 0.5rem;
+}
+
+.web-card .radio-inline {
+  margin-right: 0.9rem;
+}
+
+@media (max-width: 992px) {
+  .app-grid,
+  .layout-grid,
+  .stack-grid,
+  .analysis-grid,
+  .predict-grid,
+  .control-grid,
+  .kpi-grid,
+  .insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar-shell {
+    position: relative;
+    top: 0;
+  }
+}
+</style>")
+```
+
+```{r site-ui}
+div(
+  class = "site-wrap",
+  div(
+    class = "app-shell",
+    div(
+      class = "app-grid",
+      div(
+        class = "sidebar-shell",
+        div(
+          class = "sidebar-head",
+          div(class = "brand-dot"),
+          div(
+            h3("Donezo"),
+            p("kNN workspace")
+          )
+        ),
+        tags$p(class = "menu-label", "Menu"),
+        radioButtons(
+          "sidebar_page",
+          "Navigate",
+          choices = c("Dashboard" = "dashboard", "Data" = "data", "Concept Answers" = "answers"),
+          selected = "dashboard"
+        )
+      ),
+      div(
+        class = "main-shell",
+        div(
+          class = "topbar",
+          div(class = "profile-chip", "Group 4")
+        ),
+        conditionalPanel(
+          condition = "input.sidebar_page == 'dashboard'",
+          div(
+            class = "hero",
+            h2("Dashboard"),
+            p("Plan, inspect, and explain how k and scaling influence kNN performance.")
+          ),
+          div(
+            class = "web-card",
+            h3("Controls"),
+            div(
+              class = "control-grid",
+              div(
+                sliderInput("k_val", "Number of Neighbors (k)", min = 1, max = 35, value = 7, step = 2)
+              ),
+              div(
+                radioButtons(
+                  "scale_mode",
+                  "Feature Preparation",
+                  choices = c("Scaled features" = "scaled", "Unscaled features" = "unscaled"),
+                  selected = "scaled"
+                )
+              )
+            )
+          ),
+          div(
+            class = "web-card",
+            h3("Live Performance"),
+            uiOutput("metric_cards")
+          ),
+          div(
+            class = "web-card",
+            h3("Accuracy Trend"),
+            plotlyOutput("k_curve", height = "320px")
+          ),
+          div(
+            class = "analysis-grid",
+            div(
+              class = "web-card",
+              h3("Confusion Matrix"),
+              uiOutput("cm_breakdown"),
+              DTOutput("cm_table")
+            ),
+            div(
+              class = "web-card",
+              h3("Actual vs Predicted"),
+              plotlyOutput("actual_pred_plot", height = "240px")
+            ),
+            div(
+              class = "web-card",
+              h3("Feature Range Effect"),
+              plotlyOutput("range_plot", height = "240px")
+            )
+          ),
+          div(
+            class = "web-card",
+            h3("Try One Passenger"),
+            p("Enter feature values and see how the current kNN setup predicts using nearest-neighbor voting."),
+            div(
+              class = "predict-grid",
+              numericInput("pred_pclass", "Pclass", value = 3, min = 1, max = 3, step = 1),
+              selectInput("pred_sex", "Sex", choices = c("female", "male"), selected = "male"),
+              numericInput("pred_age", "Age", value = 30, min = 0, max = 80, step = 1),
+              numericInput("pred_fare", "Fare", value = 20, min = 0, max = 600, step = 0.5)
+            ),
+            uiOutput("single_pred_summary"),
+            DTOutput("neighbor_table"),
+            tags$hr(),
+            h4("Input Point and Nearest Neighbors"),
+            plotlyOutput("neighbor_scatter", height = "320px")
+          )
+        ),
+        conditionalPanel(
+          condition = "input.sidebar_page == 'answers'",
+          div(
+            class = "hero",
+            h2("Concept Answers"),
+            p("Clean and direct responses for your required discussion items.")
+          ),
+          div(
+            class = "web-card",
+            div(
+              class = "insight-grid",
+              div(
+                class = "insight-card",
+                h4("a) Why accuracy drops when k is too large"),
+                p("Large k averages too many neighbors, including distant points from other classes. Decision boundaries become too smooth, causing underfitting and lower accuracy.")
+              ),
+              div(
+                class = "insight-card",
+                h4("b) Why scaling is required for kNN"),
+                p("kNN uses distance directly. Features with larger ranges (like Fare) dominate distance unless scaled, so the model can ignore other useful signals.")
+              ),
+              div(
+                class = "insight-card",
+                h4("c) Trade-off between small and large k"),
+                p("Small k captures local patterns and can fit complex structure but is sensitive to noise. Large k is stable and less noisy but may miss local class structure.")
+              )
+            )
+          )
+        ),
+        conditionalPanel(
+          condition = "input.sidebar_page == 'data'",
+          div(
+            class = "hero",
+            h2("Data"),
+            p("Inspect each preprocessing stage: raw vs cleaned, then cleaned scaled vs unscaled.")
+          ),
+          div(
+            class = "web-card",
+            h3("Raw vs Cleaned"),
+            radioButtons(
+              "raw_clean_view",
+              NULL,
+              choices = c("Raw Data" = "raw", "Cleaned Data" = "cleaned"),
+              inline = TRUE
+            ),
+            DTOutput("data_table_raw_clean")
+          ),
+          div(
+            class = "web-card",
+            h3("Cleaned: Scaled vs Unscaled"),
+            radioButtons(
+              "scale_view",
+              NULL,
+              choices = c("Unscaled" = "unscaled", "Scaled" = "scaled"),
+              inline = TRUE
+            ),
+            DTOutput("data_table_scaled_unscaled")
+          ),
+          div(
+            class = "web-card",
+            h3("Data Partitioning"),
+            p("The model uses a stratified split of cleaned data into train and test sets."),
+            DTOutput("partition_table"),
+            plotlyOutput("partition_plot", height = "220px")
+          )
+        )
+      )
+    )
+  ),
+  div(class = "footer-note", "kNN Analysis Dashboard Website | Built with Shiny + custom CSS")
+)
+```
+
+```{r server, include=FALSE}
+model_result <- reactive({
+  evaluate_knn(input$k_val, input$scale_mode)
+})
+
+single_prediction <- reactive({
+  req(input$pred_pclass, input$pred_sex, input$pred_age, input$pred_fare, input$k_val, input$scale_mode)
+
+  train_x <- if (input$scale_mode == "scaled") train_x_scaled else train_x_unscaled
+
+  new_obs <- data.frame(
+    Pclass = input$pred_pclass,
+    Sex = factor(input$pred_sex, levels = levels(titanic$Sex)),
+    Age = input$pred_age,
+    Fare = input$pred_fare
+  )
+
+  if (input$scale_mode == "scaled") {
+    new_obs[, num_cols] <- predict(pre_proc, new_obs[, num_cols])
+  }
+
+  new_obs$Sex <- as.numeric(new_obs$Sex)
+
+  dists <- sqrt(rowSums((sweep(train_x, 2, as.numeric(new_obs[1, ]), "-"))^2))
+  neighbor_idx <- order(dists)[seq_len(min(input$k_val, length(dists)))]
+
+  neighbor_df <- train_data[neighbor_idx, c("Survived", "Pclass", "Sex", "Age", "Fare")]
+  neighbor_df$Distance <- round(dists[neighbor_idx], 4)
+
+  pred <- knn(train = train_x, test = new_obs, cl = train_data$Survived, k = input$k_val)
+  votes <- table(neighbor_df$Survived)
+
+  list(
+    predicted = as.character(pred[1]),
+    votes = votes,
+    neighbors = neighbor_df
+  )
+})
+
+output$metric_cards <- renderUI({
+  res <- model_result()
+
+  card <- function(label, value) {
+    div(
+      class = "kpi-card",
+      tags$p(class = "kpi-label", label),
+      tags$p(class = "kpi-value", value)
+    )
+  }
+
+  div(
+    class = "kpi-grid",
+    card("Accuracy", sprintf("%.1f%%", 100 * res$accuracy)),
+    card("Sensitivity", sprintf("%.1f%%", 100 * res$sensitivity)),
+    card("Specificity", sprintf("%.1f%%", 100 * res$specificity)),
+    card("k Value", as.character(input$k_val))
+  )
+})
+
+output$cm_table <- renderDT({
+  datatable(
+    model_result()$cm_table,
+    options = list(dom = "t", ordering = FALSE, pageLength = 5),
+    rownames = TRUE
+  )
+})
+
+output$cm_breakdown <- renderUI({
+  cm <- model_result()$cm_table
+
+  tp <- if (all(c("Survived", "Survived") %in% c(rownames(cm), colnames(cm)))) cm["Survived", "Survived"] else 0
+  tn <- if (all(c("Died", "Died") %in% c(rownames(cm), colnames(cm)))) cm["Died", "Died"] else 0
+  fp <- if (all(c("Died", "Survived") %in% c(rownames(cm), colnames(cm)))) cm["Died", "Survived"] else 0
+  fn <- if (all(c("Survived", "Died") %in% c(rownames(cm), colnames(cm)))) cm["Survived", "Died"] else 0
+
+  pill <- function(label, value) {
+    div(
+      class = "cm-pill",
+      tags$p(class = "cm-pill-title", label),
+      tags$p(class = "cm-pill-value", as.character(value))
+    )
+  }
+
+  div(
+    class = "cm-grid",
+    pill("True Positive", tp),
+    pill("False Positive", fp),
+    pill("True Negative", tn),
+    pill("False Negative", fn)
+  )
+})
+
+output$k_curve <- renderPlotly({
+  p <- ggplot(accuracy_curve, aes(x = k, y = accuracy, color = mode, text = paste("k:", k, "<br>Accuracy:", percent(accuracy, accuracy = 0.1)))) +
+    geom_line(linewidth = 1.2) +
+    geom_point(size = 2) +
+    geom_vline(xintercept = input$k_val, linetype = "dashed", color = "#102a43") +
+    scale_color_manual(values = c("Scaled" = "#0f766e", "Unscaled" = "#c2410c")) +
+    scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0.65, 0.9)) +
+    labs(x = "k", y = "Accuracy", color = "Mode") +
+    theme_minimal(base_size = 13) +
+    theme(
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.grid.minor = element_blank(),
+      legend.position = "top"
+    )
+
+  ggplotly(p, tooltip = "text") %>% layout(margin = list(l = 40, r = 10, t = 15, b = 40))
+})
+
+output$range_plot <- renderPlotly({
+  df <- data.frame(
+    Feature = rep(feature_range$Feature, 2),
+    Range = c(feature_range$Raw, feature_range$Scaled),
+    Mode = rep(c("Raw", "Scaled"), each = nrow(feature_range))
+  )
+
+  p <- ggplot(df, aes(x = Feature, y = Range, fill = Mode, text = paste("Feature:", Feature, "<br>Range:", round(Range, 2)))) +
+    geom_col(position = "dodge") +
+    scale_fill_manual(values = c("Raw" = "#c2410c", "Scaled" = "#0f766e")) +
+    labs(x = NULL, y = "Range width", fill = NULL) +
+    theme_minimal(base_size = 13) +
+    theme(
+      plot.background = element_rect(fill = "transparent", color = NA),
+      panel.grid.minor = element_blank(),
+      legend.position = "top"
+    )
+
+  ggplotly(p, tooltip = "text") %>% layout(margin = list(l = 45, r = 10, t = 15, b = 40))
+})
+
+output$actual_pred_plot <- renderPlotly({
+  df <- model_result()$truth_pred
+  counts <- as.data.frame(table(df$Actual, df$Predicted))
+  names(counts) <- c("Actual", "Predicted", "Count")
+  counts$Type <- ifelse(counts$Actual == counts$Predicted, "Correct", "Incorrect")
+
+  p <- ggplot(
+    counts,
+    aes(
+      x = Actual,
+      y = Predicted,
+      fill = Count,
+      text = paste("Actual:", Actual, "<br>Predicted:", Predicted, "<br>Count:", Count, "<br>", Type)
+    )
+  ) +
+    geom_tile(color = "white", linewidth = 1) +
+    geom_text(aes(label = Count), color = "#111827", fontface = "bold", size = 5) +
+    scale_fill_gradient(low = "#d1fae5", high = "#047857") +
+    labs(x = "Actual Class", y = "Predicted Class", fill = "Count") +
+    theme_minimal(base_size = 12) +
+    theme(
+      panel.grid = element_blank(),
+      legend.position = "none",
+      plot.background = element_rect(fill = "transparent", color = NA)
+    )
+
+  ggplotly(p, tooltip = "text") %>% layout(margin = list(l = 40, r = 10, t = 10, b = 40))
+})
+
+output$single_pred_summary <- renderUI({
+  res <- single_prediction()
+  survived_votes <- if ("Survived" %in% names(res$votes)) as.integer(res$votes[["Survived"]]) else 0
+  died_votes <- if ("Died" %in% names(res$votes)) as.integer(res$votes[["Died"]]) else 0
+
+  div(
+    class = "predict-result",
+    tags$p(class = "predict-main", paste("Predicted Class:", res$predicted)),
+    tags$p(class = "predict-sub", paste0("Neighbor votes (k = ", input$k_val, ") -> Survived: ", survived_votes, " | Died: ", died_votes))
+  )
+})
+
+output$neighbor_table <- renderDT({
+  datatable(
+    single_prediction()$neighbors,
+    options = list(pageLength = 6, scrollX = TRUE, order = list(list(5, "asc"))),
+    rownames = FALSE
+  )
+})
+
+output$neighbor_scatter <- renderPlotly({
+  req(input$pred_age, input$pred_fare)
+
+  train_plot <- train_data[, c("Age", "Fare", "Survived")]
+  train_plot$Group <- "Training"
+
+  train_x <- if (input$scale_mode == "scaled") train_x_scaled else train_x_unscaled
+  new_obs <- data.frame(
+    Pclass = input$pred_pclass,
+    Sex = factor(input$pred_sex, levels = levels(titanic$Sex)),
+    Age = input$pred_age,
+    Fare = input$pred_fare
+  )
+  if (input$scale_mode == "scaled") {
+    new_obs[, num_cols] <- predict(pre_proc, new_obs[, num_cols])
+  }
+  new_obs$Sex <- as.numeric(new_obs$Sex)
+
+  dists <- sqrt(rowSums((sweep(train_x, 2, as.numeric(new_obs[1, ]), "-"))^2))
+  neighbor_idx <- order(dists)[seq_len(min(input$k_val, length(dists)))]
+
+  neighbors_plot <- train_data[neighbor_idx, c("Age", "Fare", "Survived")]
+  neighbors_plot$Group <- "Nearest Neighbor"
+
+  input_plot <- data.frame(
+    Age = input$pred_age,
+    Fare = input$pred_fare,
+    Survived = "Input",
+    Group = "Input Point"
+  )
+
+  combined <- rbind(
+    data.frame(train_plot, stringsAsFactors = FALSE),
+    data.frame(neighbors_plot, stringsAsFactors = FALSE),
+    input_plot
+  )
+
+  p <- ggplot(combined, aes(x = Age, y = Fare, text = paste("Age:", round(Age, 1), "<br>Fare:", round(Fare, 2), "<br>Class:", Survived, "<br>Type:", Group))) +
+    geom_point(
+      data = subset(combined, Group == "Training"),
+      color = "#9ca3af",
+      alpha = 0.35,
+      size = 2
+    ) +
+    geom_point(
+      data = subset(combined, Group == "Nearest Neighbor"),
+      aes(color = as.factor(Survived)),
+      size = 3,
+      alpha = 0.95
+    ) +
+    geom_point(
+      data = subset(combined, Group == "Input Point"),
+      color = "#ef4444",
+      size = 4,
+      shape = 8,
+      stroke = 1.2
+    ) +
+    scale_color_manual(values = c("Died" = "#1f2937", "Survived" = "#0f766e"), drop = FALSE) +
+    labs(x = "Age", y = "Fare", color = "Neighbor Class") +
+    theme_minimal(base_size = 12) +
+    theme(
+      panel.grid.minor = element_blank(),
+      plot.background = element_rect(fill = "transparent", color = NA)
+    )
+
+  ggplotly(p, tooltip = "text") %>% layout(margin = list(l = 45, r = 10, t = 10, b = 40))
+})
+
+output$data_table_raw_clean <- renderDT({
+  df <- if (input$raw_clean_view == "raw") {
+    raw_data
+  } else {
+    cleaned_data
+  }
+
+  datatable(
+    df,
+    options = list(pageLength = 8, scrollX = TRUE),
+    rownames = FALSE
+  )
+})
+
+output$partition_table <- renderDT({
+  part_df <- partition_summary
+  part_df$Percent <- sprintf("%.1f%%", part_df$Percent)
+
+  datatable(
+    part_df,
+    options = list(dom = "t", ordering = FALSE),
+    rownames = FALSE
+  )
+})
+
+output$partition_plot <- renderPlotly({
+  df <- partition_summary[partition_summary$Split %in% c("Train", "Test"), ]
+
+  p <- ggplot(df, aes(x = Split, y = Rows, fill = Split, text = paste0(Split, "<br>Rows: ", Rows, "<br>", sprintf("%.1f%%", Percent)))) +
+    geom_col(width = 0.6) +
+    geom_text(aes(label = paste0(sprintf("%.1f", Percent), "%")), vjust = -0.5, fontface = "bold") +
+    scale_fill_manual(values = c("Train" = "#0f766e", "Test" = "#c2410c")) +
+    labs(x = NULL, y = "Rows") +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "none",
+      panel.grid.minor = element_blank(),
+      plot.background = element_rect(fill = "transparent", color = NA)
+    )
+
+  ggplotly(p, tooltip = "text") %>% layout(margin = list(l = 45, r = 10, t = 10, b = 35))
+})
+
+output$data_table_scaled_unscaled <- renderDT({
+  df <- if (input$scale_view == "scaled") {
+    scaled_display
+  } else {
+    unscaled_display
+  }
+
+  datatable(
+    df,
+    options = list(pageLength = 8, scrollX = TRUE),
+    rownames = FALSE
+  )
+})
+```

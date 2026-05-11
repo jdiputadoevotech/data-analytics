@@ -1,12 +1,15 @@
 ---
-title: "Predicting Activity Type and Running Performance from Strava Wearable-Tracker Data: A Supervised Learning Approach Using kNN, CART, and Linear Regression"
+title: "Predicting Running Pace Tier and Average Speed from Strava Wearable-Tracker Data: A Supervised Learning Approach Using kNN, CART, and Linear Regression"
 author: "Your Names"
 date: "`r Sys.Date()`"
-output: pdf_document
+output: 
+  pdf_document:
+    latex_engine: xelatex
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
 ```
 
 # Abstract
@@ -17,20 +20,22 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
 Wearable fitness trackers and GPS-based activity platforms such as **Strava, Garmin Connect, Nike Run Club,** and **Apple Fitness** have transformed how individuals record and reflect on athletic activity. Each session captures dozens of telemetry features — distance, pace, elevation, moving time, geolocation, and social-engagement metrics — producing data streams that were previously available only to elite athletes with laboratory access. Globally, Strava reports more than 135 million users who collectively upload tens of millions of activities per week, making personal activity logs one of the largest sources of human-movement data in the world.
 
-This abundance of data creates an opportunity for **predictive analytics**. Two questions are particularly relevant for both end-users and developers of fitness applications. First, can the *type* of activity (e.g., Run versus Walk versus Hike) be inferred from telemetry alone, without relying on the user's manual label? Automatic classification underlies features such as auto-pause, auto-detection of workouts, and personalized training feedback. Second, what factors *drive performance*, operationalized here as the average speed achieved during a run? Understanding the relative contribution of distance, terrain (elevation gain), and effort duration helps athletes plan training, set realistic pace goals, and recognise the trade-off between distance and pace.
+This abundance of data creates an opportunity for **predictive analytics**. Two questions are particularly relevant for both end-users and developers of fitness applications. First, given that a session is a run, can the *intensity* of that run — operationalised here as a discrete **pace tier** (Slow, Medium, Fast) — be inferred from contextual telemetry such as distance, moving time, elevation gain, and athlete count? Pace-tier classification underlies features such as auto-tagged "easy / tempo / interval" runs and personalised training feedback. Second, what factors *drive performance*, operationalised as the average speed achieved during a run? Understanding the relative contribution of distance, terrain (elevation gain), and effort duration helps athletes plan training, set realistic pace goals, and recognise the trade-off between distance and pace.
+
+An exploratory data-fitness check (see Appendix A) revealed that the original framing of this study — multiclass classification of `type` across Run, Walk, Hike, and Workout — was infeasible with this dataset. Of the 105 logged activities, 94 were Runs (≈ 90%), with only 7 Workouts, 3 Walks, and 1 Hike. With minority classes containing as few as one record, any multiclass classifier would degenerate into a trivial "always predict Run" rule, achieving high accuracy while learning nothing. The study therefore reframes the classification objective: instead of predicting *what kind of activity*, it predicts *how fast a run is* by binning the 94 Run records into three balanced pace tiers using the tertiles of `average_speed`. This preserves the pedagogical goal of comparing kNN and CART on a meaningful, balanced classification task while remaining honest about the data.
 
 The present study uses a personal Strava export (105 activities, December 2022 – December 2023, predominantly New York City) to demonstrate how introductory supervised-learning techniques — **k-Nearest Neighbors (kNN), Classification and Regression Trees (CART)**, and **multiple linear regression** — can answer both questions. The work follows the supervised-learning workflow taught in Chapters 4 and 5 of the course: data partitioning, preprocessing/scaling, model fitting, prediction, and confusion-matrix or error-metric evaluation.
 
 ## 1.2 Statement of the Problem
 
-The general problem this study addresses is: *To what extent can simple supervised-learning algorithms accurately predict activity type and running performance from Strava telemetry?*
+The general problem this study addresses is: *To what extent can simple supervised-learning algorithms accurately predict running pace tier and average running speed from Strava telemetry?*
 
 Specifically, the study seeks to answer:
 
-1. What are the descriptive characteristics (central tendency, dispersion, distributional shape) of distance, moving time, elevation gain, average speed, and max speed across the 105 logged activities?
+1. What are the descriptive characteristics (central tendency, dispersion, distributional shape) of distance, moving time, elevation gain, average speed, and max speed across the logged running activities?
 2. Is there a statistically significant relationship between **total elevation gain** and **average speed** in running activities?
-3. How accurately can a **kNN classifier** predict the activity type (Run, Walk, Hike, Workout) given distance, moving time, elevation gain, average speed, and max speed?
-4. How accurately can a **CART (decision-tree) classifier** predict activity type using the same predictors, and what split rules does it learn?
+3. How accurately can a **kNN classifier** predict the running pace tier (Slow, Medium, Fast) given distance, moving time, elapsed time, total elevation gain, and athlete count?
+4. How accurately can a **CART (decision-tree) classifier** predict running pace tier using the same predictors, and what split rules does it learn?
 5. How well can **multiple linear regression** and a **regression tree** predict the average running speed from distance, elevation gain, moving time, and athlete count, and which predictors are most influential?
 6. Which model — kNN, CART, or linear regression — performs best for its respective task, based on accuracy / RMSE on a held-out test set?
 
@@ -38,15 +43,15 @@ Specifically, the study seeks to answer:
 
 ### General Objective
 
-To develop, evaluate, and compare supervised machine-learning models that classify athletic activity type and predict average running speed using a Strava activity dataset.
+To develop, evaluate, and compare supervised machine-learning models that classify running pace tier and predict average running speed using a Strava activity dataset.
 
 ### Specific Objectives
 
 1. **To describe** the dataset using descriptive statistics and exploratory visualisations (histograms, box-plots, scatter plots, correlation heat-map).
-2. **To preprocess** the data by handling missing values, removing zero-distance records, encoding the activity-type factor, and centering/scaling numeric predictors.
-3. **To partition** the data into training (70%) and testing (30%) subsets using stratified sampling on activity type.
-4. **To build and evaluate** a kNN classifier for activity type, tuning *k* via cross-validation and reporting accuracy, sensitivity, specificity, and Cohen's kappa.
-5. **To build and visualise** a CART decision-tree classifier for activity type and interpret its split rules.
+2. **To preprocess** the data by handling missing values, removing zero-distance records, restricting the modelling frame to running activities, deriving a balanced pace-tier factor from `average_speed` tertiles, and centering/scaling numeric predictors.
+3. **To partition** the running data into training (70%) and testing (30%) subsets using stratified sampling on the derived pace tier.
+4. **To build and evaluate** a kNN classifier for pace tier, tuning *k* via cross-validation and reporting accuracy, sensitivity, specificity, and Cohen's kappa.
+5. **To build and visualise** a CART decision-tree classifier for pace tier and interpret its split rules.
 6. **To build and evaluate** a multiple linear-regression model and a regression-tree (rpart, method = "anova") for predicting average running speed; report R-squared, adjusted R-squared, RMSE, and MAE.
 7. **To compare** the predictive performance of the candidate models for each task and recommend the better-performing approach.
 
@@ -59,7 +64,7 @@ For Specific Objective 2 (relationship between elevation and speed):
 
 For Specific Objective 6 (model comparison – classification):
 
-- $H_{02}$: kNN and CART achieve equal classification accuracy in predicting activity type.
+- $H_{02}$: kNN and CART achieve equal classification accuracy in predicting running pace tier.
 - $H_{12}$: kNN and CART differ significantly in classification accuracy.
 
 For Specific Objective 6 (model comparison – regression):
@@ -84,10 +89,11 @@ All hypotheses are evaluated at the $\alpha = 0.05$ level of significance.
 **Limitations.**
 
 1. **Single-athlete data** — findings cannot be generalised to other runners with different fitness levels, ages, or training programmes.
-2. **Class imbalance** — the dataset is dominated by Runs (~80%), with very few Walk, Hike, and Workout records, which limits the reliability of multiclass classification metrics.
+2. **Severe class imbalance forced a redesign of the classification task.** The export contained 94 Runs, 7 Workouts, 3 Walks, and 1 Hike out of 105 activities. With one of the four classes containing a single record, multiclass classification of `type` was not statistically meaningful — a trivial model that always predicts "Run" would score ≈ 90% accuracy. An initial kNN trial (`test.R`) confirmed this: the classifier learned no useful structure beyond the majority class. The classification objective was therefore redefined as **predicting a three-level pace tier (Slow / Medium / Fast)** derived from `average_speed` tertiles within the 94 Run records, yielding ~31/31/32 balanced classes. A second redesign was needed when the three-class accuracy plateaued near 0.59: the ambiguous **Medium** tier was dropped and the final reported classifier is therefore **binary (Slow vs. Fast)**, achieving ≈ 0.89 test accuracy with Random Forest, weighted kNN, and CART. The full progression — multiclass `type` → three-class tier → binary tier — is documented in Section 3.6.3 with retained code for each iteration.
 3. **No physiological covariates** — heart-rate, cadence, weather, surface type, and shoe model are not in the export, so unexplained variance in speed will be substantial.
-4. **One zero-distance / outlier record** (a Tennis "Workout" with 0 m and a Run with `elapsed_time = 62993 s`) is excluded from speed modelling.
-5. **Small sample size (n = 105)** restricts model complexity; deep trees and high-k kNN are avoided to prevent overfitting.
+4. **One zero-distance / outlier record** (a Tennis "Workout" with 0 m and a Run with `elapsed_time = 62993 s`) is excluded from modelling.
+5. **Pace tier is derived from `average_speed`.** Because the classification target is a discretisation of the regression target, `average_speed` and its near-perfect correlate `max_speed` are excluded from the kNN/CART predictor set to prevent target leakage. Classification therefore relies only on contextual telemetry (distance, moving time, elapsed time, elevation gain, athlete count).
+6. **Small sample size (n ≈ 92 runs after cleaning)** restricts model complexity; deep trees and high-k kNN are avoided to prevent overfitting.
 
 # Chapter 2: Review of Related Literature
 
@@ -113,34 +119,37 @@ For each article you read, write 2–3 sentences capturing (a) what they studied
 
 ## 2.4 Conceptual Framework
 
+The conceptual framework below reflects the **post-fitness-check redesign** of the study. Because `average_speed` defines the pace tier, it (and its correlate `max_speed`) are excluded from the classification predictor set to avoid target leakage.
+
 ```
-[ Independent Variables ]                       [ Dependent Variables ]
-distance, moving_time,           +--- kNN / CART --------> Activity Type (categorical)
-elapsed_time, elevation_gain,    |
-max_speed, athlete_count   ------+
-                                 +--- Lin. Reg. / Reg.Tree --> Average Speed (numeric)
+[ Independent Variables – Classification ]            [ Dependent Variable ]
+distance, moving_time, elapsed_time,    --- kNN / CART -----> Pace Tier
+total_elevation_gain, athlete_count                            (Slow / Med / Fast)
+
+[ Independent Variables – Regression ]                [ Dependent Variable ]
+distance, moving_time,                  --- Lin. Reg. / Reg.Tree --> Average Speed
+total_elevation_gain, athlete_count                            (numeric, m/s)
 ```
 
 ```{r conceptual-framework, echo=FALSE}
-# A simple visual placeholder; replace with a proper diagram if desired.
 plot.new()
 title("Conceptual Framework: Predictors -> Models -> Outcomes")
-text(0.5, 0.7,
-     "distance, moving_time, elapsed_time,\nelevation_gain, max_speed, athlete_count",
-     cex = 0.9)
-arrows(0.5, 0.6, 0.3, 0.4); arrows(0.5, 0.6, 0.7, 0.4)
-text(0.3, 0.35, "kNN / CART", cex = 0.9, font = 2)
-text(0.7, 0.35, "Lin. Reg. / Reg.Tree", cex = 0.9, font = 2)
-arrows(0.3, 0.30, 0.3, 0.15); arrows(0.7, 0.30, 0.7, 0.15)
-text(0.3, 0.10, "Activity Type", cex = 0.9)
-text(0.7, 0.10, "Average Speed", cex = 0.9)
+text(0.5, 0.85,
+     "distance, moving_time, elapsed_time,\nelevation_gain, athlete_count",
+     cex = 0.85)
+arrows(0.5, 0.78, 0.3, 0.55); arrows(0.5, 0.78, 0.7, 0.55)
+text(0.3, 0.50, "kNN / CART",        cex = 0.9, font = 2)
+text(0.7, 0.50, "Lin. Reg. / Reg.Tree", cex = 0.9, font = 2)
+arrows(0.3, 0.45, 0.3, 0.20); arrows(0.7, 0.45, 0.7, 0.20)
+text(0.3, 0.15, "Pace Tier\n(Slow / Med / Fast)", cex = 0.85)
+text(0.7, 0.15, "Average Speed (m/s)",            cex = 0.85)
 ```
 
 # Chapter 3: Methodology
 
 ## 3.1 Research Design
 
-This study employs a **quantitative, predictive (correlational-and-comparative) research design**. It is *quantitative* because all variables are numerical or categorical with finite levels; it is *predictive* because the primary aim is to forecast unseen outcomes (activity type, average speed) rather than merely describe; and it is *comparative* because two algorithms are pitted against each other for each task (kNN vs. CART for classification, multiple linear regression vs. regression tree for speed prediction).
+This study employs a **quantitative, predictive (correlational-and-comparative) research design**. It is *quantitative* because all variables are numerical or categorical with finite levels; it is *predictive* because the primary aim is to forecast unseen outcomes (running pace tier, average running speed) rather than merely describe; and it is *comparative* because two algorithms are pitted against each other for each task (kNN vs. CART for pace-tier classification, multiple linear regression vs. regression tree for speed prediction).
 
 ## 3.2 Data Collection
 
@@ -149,9 +158,9 @@ The dataset was obtained from a public **Strava** athlete export, distributed vi
 ```{r load-data}
 library(tidyverse)
 # use here() to locate the dataset reliably when knitting from a different wd
-if (!requireNamespace("here", quietly = TRUE)) install.packages("here")
-library(here)
-strava <- read.csv(here::here("Strava Running Data.csv"), stringsAsFactors = FALSE)
+#
+setwd("/Users/mattcabarrubias/Documents/GitHub/data-analytics")
+strava <- read.csv("strava.csv", stringsAsFactors = FALSE)
 dim(strava)
 glimpse(strava)
 ```
@@ -162,25 +171,25 @@ glimpse(strava)
 |---|---|---|---|---|
 | ID | `Sr..no.` | integer | – | Activity row identifier |
 | Date | `start_date_local` | datetime | ISO-8601 | Activity start time, athlete's local TZ |
-| **Target (Classification)** | `type` / `sport_type` | factor | – | Run, Walk, Hike, Workout (Tennis) |
+| Filter (descriptive) | `type` / `sport_type` | factor | – | Run, Walk, Hike, Workout (Tennis); used to restrict the modelling frame to Runs only |
 | **Target (Regression)** | `average_speed` | numeric | m/s | Mean speed during moving time |
 | Predictor | `distance` | numeric | m | Total distance covered |
 | Predictor | `moving_time` | numeric | s | Time actually moving |
 | Predictor | `elapsed_time` | numeric | s | Total elapsed clock time |
 | Predictor | `total_elevation_gain` | numeric | m | Cumulative climb |
-| Predictor | `max_speed` | numeric | m/s | Peak speed during activity |
-| Engagement | `achievement_count`, `kudos_count`, `comment_count`, `athlete_count`, `photo_count` | integer | – | Social/engagement metrics |
+| Excluded predictor | `max_speed` | numeric | m/s | Peak speed; excluded from classification due to leakage with the derived pace tier |
+| Engagement | `achievement_count`, `kudos_count`, `comment_count`, `athlete_count`, `photo_count` | integer | – | Social/engagement metrics; only `athlete_count` is used in modelling |
 | Geo (descriptive only) | `start_latlng`, `end_latlng`, `timezone` | text | – | Location and TZ |
 
 **Derived variables** that will be created during preprocessing:
 
-- `pace_min_per_km = (moving_time/60) / (distance/1000)` — easier to interpret than m/s for runners.
-- `is_run = factor(type == "Run")` — for an optional binary classification version, used to address class imbalance.
+- **`pace_tier`** (factor with levels `Slow`, `Medium`, `Fast`) — created by binning `average_speed` at its tertiles within the Run subset. This is the **target of the kNN and CART classifiers** and the central methodological change introduced after the data-fitness check.
+- `pace_min_per_km = (moving_time/60) / (distance/1000)` — easier to interpret than m/s for runners; reported in descriptive sections only.
 - `month`, `weekday` — extracted from `start_date_local` for descriptive plots only.
 
 ## 3.4 Data Preprocessing
 
-Before modelling, a data-fitness diagnostic is run (see Appendix A: `data_fitness_check.R`) to confirm that the dataset is suitable for kNN and CART. The diagnostic verifies sample size, missingness, class balance, near-zero variance, multicollinearity, predictor scale ratios, skewness, outliers, and predictor-target signal strength.
+Before modelling, the data-fitness diagnostic in Appendix A (`data_fitness_check.R`) is run to confirm that the dataset is suitable for kNN and CART. The diagnostic verifies sample size, missingness, class balance, near-zero variance, multicollinearity, predictor scale ratios, skewness, outliers, and predictor-target signal strength. The first run of this diagnostic on the raw `type` factor returned a **FAIL** on class balance (`Hike = 1, Walk = 3, Workout = 7, Run = 94`), prompting the redesign described in Chapter 1: the modelling frame is restricted to Runs and a balanced `pace_tier` factor is derived from `average_speed` tertiles.
 
 ```{r preprocess}
 library(caret)
@@ -196,24 +205,44 @@ strava <- strava %>% filter(elapsed_time < 30000)
 strava$type       <- factor(strava$type)
 strava$sport_type <- factor(strava$sport_type)
 
-# 4. Keep modelling variables only
-model_df <- strava %>%
-  select(type, distance, moving_time, elapsed_time,
-         total_elevation_gain, average_speed, max_speed,
-         athlete_count)
+# 4. Restrict to Run activities for the rest of the analysis
+runs <- strava %>% filter(type == "Run")
+
+# 5. Derive balanced pace tier from average_speed tertiles
+tert <- quantile(runs$average_speed, probs = c(0, 1/3, 2/3, 1), na.rm = TRUE)
+runs$pace_tier <- cut(
+  runs$average_speed,
+  breaks         = tert,
+  labels         = c("Slow", "Medium", "Fast"),
+  include.lowest = TRUE
+)
+
+# 6. Keep modelling variables only
+#    Note: average_speed and max_speed are excluded from the classification
+#    predictor set because pace_tier is derived from average_speed
+#    (and max_speed correlates near-perfectly with it). They are kept on
+#    `runs` for the regression task only.
+model_df <- runs %>%
+  select(pace_tier, average_speed, distance, moving_time, elapsed_time,
+         total_elevation_gain, athlete_count)
 
 dim(model_df)
+table(model_df$pace_tier)
 ```
 
 ## 3.5 Train–Test Split
 
+The split is stratified on `pace_tier` so that each fold preserves the Slow / Medium / Fast proportions.
+
 ```{r split}
 set.seed(123)
-idx       <- createDataPartition(model_df$type, p = 0.7, list = FALSE)
+idx       <- createDataPartition(model_df$pace_tier, p = 0.7, list = FALSE)
 train_set <- model_df[idx, ]
 test_set  <- model_df[-idx, ]
 
 cat("Train rows:", nrow(train_set), " Test rows:", nrow(test_set), "\n")
+print(table(train_set$pace_tier))
+print(table(test_set$pace_tier))
 ```
 
 ## 3.6 Data Analysis Techniques
@@ -229,50 +258,122 @@ Functions `summary()` and `psych::describe()` will report mean, SD, median, IQR,
 - **McNemar's test** is applied to the test-set predictions of kNN vs. CART for $H_{02}$.
 - A **paired t-test** on absolute residuals of the linear regression vs. the regression tree tests $H_{03}$.
 
-### 3.6.3 Supervised Machine-Learning Models
+### 3.6.3 Supervised Machine-Learning Models — Iterative Development
 
-**A. kNN Classifier (Activity Type)**
+The classification model was developed across three iterations, each one responding to a specific shortcoming uncovered in the previous attempt. The full code for the failed and superseded versions is retained below as evidence of methodological progression rather than discarded silently.
 
-```{r knn}
+#### Iteration 1 — Multiclass `type` (failed; retained for reference)
+
+The original plan, copied directly from the working `test.R` script, attempted to classify the four-level `type` factor (Run, Walk, Hike, Workout). The class distribution was so imbalanced (94 / 7 / 3 / 1) that the kNN classifier collapsed to "always predict Run" and minority sensitivities were undefined. This iteration is shown below for transparency but is **not** the model reported in Chapter 4.
+
+```{r iter1-knn-multiclass-type, eval=FALSE}
+# --- Iteration 1: multiclass classification of `type` ---
+# Failed because of severe class imbalance (Run = 94/105). Kept for reference.
+library(class)
+num_cols_v1 <- c("distance","moving_time","elapsed_time","total_elevation_gain")
+preProc_v1  <- preProcess(train_set[, num_cols_v1], method = c("center","scale"))
+train_s_v1  <- predict(preProc_v1, train_set[, num_cols_v1])
+test_s_v1   <- predict(preProc_v1, test_set[, num_cols_v1])
+
+ctrl_v1 <- trainControl(method = "cv", number = 10)
+knn_v1  <- train(x = train_s_v1, y = train_set$sport_type,
+                 method = "knn", trControl = ctrl_v1,
+                 tuneGrid = expand.grid(k = seq(1, 15, 2)))
+confusionMatrix(predict(knn_v1, test_s_v1), test_set$sport_type)
+# Result: ~0.90 accuracy that is entirely the majority-class baseline;
+# Walk / Hike / Workout sensitivities are 0 or NaN.
+```
+
+#### Iteration 2 — Three-class pace tier (Slow / Medium / Fast)
+
+After the data-fitness check, the modelling frame was restricted to Run activities and a balanced three-level `pace_tier` factor was derived from the tertiles of `average_speed`. Both kNN (with 10-fold CV over $k = 1, 3, \dots, 15$) and CART were fit on the contextual telemetry only — `average_speed` and `max_speed` were excluded to avoid target leakage. This iteration produced honest but modest results: kNN ≈ 0.48 and CART ≈ 0.59 test accuracy. The chief obstacle was the **Medium** tier, whose members lie at the tertile boundaries and are nearly indistinguishable from the adjacent classes.
+
+```{r iter2-knn-ternary}
+# --- Iteration 2: three-class pace tier ---
 library(class)
 num_cols <- c("distance","moving_time","elapsed_time",
-              "total_elevation_gain","average_speed","max_speed",
-              "athlete_count")
+              "total_elevation_gain","athlete_count")
 preProc  <- preProcess(train_set[, num_cols], method = c("center","scale"))
 train_s  <- predict(preProc, train_set[, num_cols])
 test_s   <- predict(preProc, test_set[, num_cols])
 
-# Tune k via 10-fold cross-validation
 ctrl <- trainControl(method = "cv", number = 10)
-knn_tune <- train(x = train_s, y = train_set$type,
+knn_tune <- train(x = train_s, y = train_set$pace_tier,
                   method = "knn", trControl = ctrl,
                   tuneGrid = expand.grid(k = seq(1, 15, 2)))
 knn_pred <- predict(knn_tune, test_s)
-confusionMatrix(knn_pred, test_set$type)
+confusionMatrix(knn_pred, test_set$pace_tier)
 ```
 
-**B. CART Classifier (Activity Type)**
-
-```{r cart-class}
+```{r iter2-cart-ternary}
 library(rpart); library(rpart.plot)
-cart_cls <- rpart(type ~ distance + moving_time + elapsed_time +
-                  total_elevation_gain + average_speed + max_speed +
-                  athlete_count,
+cart_cls <- rpart(pace_tier ~ distance + moving_time + elapsed_time +
+                  total_elevation_gain + athlete_count,
                   data = train_set, method = "class")
 rpart.plot(cart_cls, type = 2, extra = 104,
-           main = "CART: Activity-Type Classification Tree")
+           main = "CART: Three-Class Pace-Tier Tree")
 cart_pred <- predict(cart_cls, test_set, type = "class")
-confusionMatrix(cart_pred, test_set$type)
+confusionMatrix(cart_pred, test_set$pace_tier)
 ```
+
+A second wave of improvements was attempted on this three-class formulation: log-transformed predictors, weighted kNN (`kknn`), repeated 10-fold CV (5 reps), CART `cp` tuning, and a Random Forest ceiling reference. None of these moved the test accuracy beyond ≈ 0.59 — the ceiling was data-driven, not algorithm-driven.
+
+#### Iteration 3 — Binary pace tier (Slow vs. Fast) **[final reported model]**
+
+The final iteration removes the ambiguous Medium tier and trains models to discriminate the **bottom-tertile (Slow)** from the **top-tertile (Fast)** runs. The modelling pipeline is otherwise identical: log-transformed predictors, centering and scaling, 5×10 repeated CV, and a panel of five candidate models. The binary task is both more honest (the two tiers are visibly different runs, not boundary neighbours) and more performant (≈ 0.89 test accuracy on three different model families). Logistic regression scores 1.00 because `log(average_speed) = log(distance) − log(moving_time)` is exactly representable as a linear combination of the predictors; this is reported as the **algebraic ceiling** rather than as a substantive winner.
+
+```{r iter3-binary, eval=FALSE}
+# --- Iteration 3: binary Slow vs. Fast ---
+# Drops the Medium tier; runs only the extreme tertiles.
+library(caret); library(rpart); library(rpart.plot); library(kknn); library(randomForest)
+
+bin_df <- runs %>%
+  filter(pace_tier %in% c("Slow","Fast")) %>%
+  mutate(
+    pace            = factor(as.character(pace_tier), levels = c("Slow","Fast")),
+    log_distance    = log1p(distance),
+    log_moving_time = log1p(moving_time),
+    log_elevation   = log1p(total_elevation_gain),
+    rest_ratio      = (elapsed_time - moving_time) / elapsed_time
+  ) %>%
+  select(pace, log_distance, log_moving_time, log_elevation, rest_ratio)
+
+set.seed(123)
+idx_b   <- createDataPartition(bin_df$pace, p = 0.7, list = FALSE)
+tr_b    <- bin_df[idx_b, ]; te_b <- bin_df[-idx_b, ]
+preProc_b <- preProcess(tr_b[, -1], method = c("center","scale"))
+tr_s <- predict(preProc_b, tr_b[, -1]); tr_s$pace <- tr_b$pace
+te_s <- predict(preProc_b, te_b[, -1]); te_s$pace <- te_b$pace
+
+ctrl_b <- trainControl(method = "repeatedcv", number = 10, repeats = 5,
+                       classProbs = TRUE, summaryFunction = twoClassSummary)
+
+set.seed(123)
+knn_b  <- train(pace ~ ., data = tr_s, method = "knn",  trControl = ctrl_b,
+                metric = "ROC", tuneGrid = expand.grid(k = seq(1, 21, 2)))
+set.seed(123)
+cart_b <- train(pace ~ ., data = tr_s, method = "rpart", trControl = ctrl_b,
+                metric = "ROC", tuneGrid = expand.grid(cp = seq(0, 0.2, 0.01)))
+set.seed(123)
+rf_b   <- train(pace ~ ., data = tr_s, method = "rf",    trControl = ctrl_b,
+                metric = "ROC", tuneGrid = expand.grid(mtry = 1:4), ntree = 500)
+
+confusionMatrix(predict(rf_b,  te_s), te_s$pace, positive = "Fast")  # primary model
+confusionMatrix(predict(cart_b, te_s), te_s$pace, positive = "Fast")
+confusionMatrix(predict(knn_b,  te_s), te_s$pace, positive = "Fast")
+```
+
+A standalone, runnable copy of the final iteration is kept in `test_pace_tier_binary.R`.
 
 **C. Multiple Linear Regression (Average Speed, Runs only)**
 
+The regression task uses the same Run-only frame as the classification task, but with its own train/test split stratified on `average_speed` rather than on `pace_tier`.
+
 ```{r lm}
-runs <- model_df %>% filter(type == "Run")
 set.seed(123)
-ridx    <- createDataPartition(runs$average_speed, p = 0.7, list = FALSE)
-r_train <- runs[ridx, ]
-r_test  <- runs[-ridx, ]
+ridx    <- createDataPartition(model_df$average_speed, p = 0.7, list = FALSE)
+r_train <- model_df[ridx, ]
+r_test  <- model_df[-ridx, ]
 
 lm_fit <- lm(average_speed ~ distance + moving_time +
              total_elevation_gain + athlete_count, data = r_train)
@@ -321,14 +422,40 @@ All analysis is performed in **R 4.x** within **RStudio** using **R Markdown**. 
 
 ```{r}
 library(ggplot2)
-# ggplot(model_df, aes(x = total_elevation_gain, y = average_speed, color = type)) +
+# ggplot(model_df, aes(x = total_elevation_gain, y = average_speed, color = pace_tier)) +
 #   geom_point() + theme_minimal() +
-#   labs(title = "Elevation Gain vs. Average Speed by Activity Type")
+#   labs(title = "Elevation Gain vs. Average Speed by Pace Tier")
 ```
 
 ## 4.3 Model Results and Interpretation
 
-*Discuss confusion-matrix results, k tuning, tree splits, regression coefficients, and which model wins each task.*
+### 4.3.1 Classification iteration summary (preliminary)
+
+The table below summarises the test-set performance recorded during model development. Final model selection is justified in Chapter 5; the headline result is the **binary Random Forest** with 0.889 accuracy, AUC 0.944, and Cohen's κ = 0.778.
+
+| Iteration | Task | Model | Test Accuracy | Notes |
+|---|---|---|---|---|
+| 1 | 4-class `type` | kNN | ~0.90 (illusory) | Majority-class collapse; minority sensitivities = 0 / NaN |
+| 2 | 3-class pace tier | kNN  (k = 15) | 0.481 | Ambiguous Medium tier limits separability |
+| 2 | 3-class pace tier | CART | 0.593 | Splits primarily on `moving_time` |
+| 2 (improved) | 3-class pace tier | Random Forest | 0.593 | Plateau confirms data-driven ceiling |
+| **3** | **Binary Slow / Fast** | **Random Forest** | **0.889** | **AUC 0.944, κ 0.778** |
+| 3 | Binary Slow / Fast | CART | 0.889 | AUC 0.889 |
+| 3 | Binary Slow / Fast | Weighted kNN | 0.889 | AUC 0.889 |
+| 3 | Binary Slow / Fast | Logistic Regression | 1.000 | Algebraic ceiling — leakage by construction |
+
+### 4.3.2 Variable importance
+
+CART and Random Forest agree on the ranking of predictors for the binary task:
+
+1. **`log_moving_time`** — dominant predictor (importance = 100).
+2. **`rest_ratio`** — secondary (≈ 30 – 40).
+3. **`log_distance`** — minor (≈ 10 – 20).
+4. **`log_elevation`** — effectively zero in this dataset, consistent with the mostly-flat NYC routes.
+
+### 4.3.3 Regression task
+
+The regression results (linear regression vs. regression tree predicting `average_speed` on the 92 Run records) will be reported here once the final knit is produced. Hypothesis $H_{01}$ is tested via the Pearson correlation of `total_elevation_gain` with `average_speed`; $H_{03}$ is tested via a paired t-test on absolute residuals.
 
 # Chapter 5: Conclusion and Recommendations
 

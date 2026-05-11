@@ -1,0 +1,729 @@
+---
+title: "Pace Predictor Dashboard"
+author: "Matt G. Cabarrubias, Matthew Angelo Lumayno, Jeane Diputado, Janritch Diputado"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: null
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+required_packages <- c("shiny", "bslib", "ggplot2", "caret", "class",
+                       "rpart", "rpart.plot", "randomForest", "kknn",
+                       "plotly", "DT", "scales", "dplyr", "tidyr")
+new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
+if (length(new_packages)) install.packages(new_packages)
+
+library(shiny)
+library(bslib)
+library(ggplot2)
+library(caret)
+library(class)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(kknn)
+library(plotly)
+library(DT)
+library(scales)
+library(dplyr)
+library(tidyr)
+
+set.seed(123)
+
+# ---- 1. Load + clean -------------------------------------------------------
+strava_raw <- read.csv("strava.csv", stringsAsFactors = FALSE)
+strava <- strava_raw %>%
+  tidyr::drop_na() %>%
+  filter(distance > 0, elapsed_time < 30000)
+strava$type <- factor(strava$type)
+
+runs <- strava %>% filter(type == "Run")
+
+# ---- 2. Pace tier (binary) -------------------------------------------------
+tert <- quantile(runs$average_speed, probs = c(0, 1/3, 2/3, 1))
+runs$pace_tier <- cut(runs$average_speed, breaks = tert,
+                     labels = c("Slow","Medium","Fast"), include.lowest = TRUE)
+
+bin_df <- runs %>%
+  filter(pace_tier %in% c("Slow","Fast")) %>%
+  mutate(
+    pace            = factor(as.character(pace_tier), levels = c("Slow","Fast")),
+    log_distance    = log1p(distance),
+    log_moving_time = log1p(moving_time),
+    log_elevation   = log1p(total_elevation_gain),
+    rest_ratio      = (elapsed_time - moving_time) / elapsed_time
+  )
+
+model_df <- bin_df %>%
+  select(pace, log_distance, log_moving_time, log_elevation, rest_ratio)
+
+# ---- 3. Train / test split -------------------------------------------------
+set.seed(123)
+idx       <- createDataPartition(model_df$pace, p = 0.7, list = FALSE)
+train_set <- model_df[idx, ]
+test_set  <- model_df[-idx, ]
+
+num_cols <- setdiff(names(model_df), "pace")
+preProc  <- preProcess(train_set[, num_cols], method = c("center","scale"))
+train_s  <- predict(preProc, train_set[, num_cols]); train_s$pace <- train_set$pace
+test_s   <- predict(preProc, test_set[,  num_cols]); test_s$pace  <- test_set$pace
+
+# ---- 4. Train all three models --------------------------------------------
+ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 5,
+                     classProbs = TRUE, summaryFunction = twoClassSummary)
+
+set.seed(123)
+knn_fit <- train(pace ~ ., data = train_s, method = "knn",
+                 trControl = ctrl, metric = "ROC",
+                 tuneGrid = expand.grid(k = seq(1, 21, 2)))
+
+set.seed(123)
+cart_fit <- train(pace ~ ., data = train_s, method = "rpart",
+                  trControl = ctrl, metric = "ROC",
+                  tuneGrid = expand.grid(cp = seq(0, 0.2, 0.01)))
+
+set.seed(123)
+rf_fit <- train(pace ~ ., data = train_s, method = "rf",
+                trControl = ctrl, metric = "ROC",
+                tuneGrid = expand.grid(mtry = 1:4),
+                ntree = 500)
+
+models <- list("Random Forest" = rf_fit, "CART" = cart_fit, "kNN" = knn_fit)
+
+# Cached test-set predictions for each model
+model_eval <- lapply(models, function(fit) {
+  pred <- predict(fit, test_s)
+  prob <- predict(fit, test_s, type = "prob")[, "Fast"]
+  cm   <- confusionMatrix(pred, test_s$pace, positive = "Fast")
+  list(
+    pred       = pred,
+    prob       = prob,
+    cm         = cm,
+    cm_table   = as.data.frame.matrix(cm$table),
+    accuracy   = unname(cm$overall["Accuracy"]),
+    kappa      = unname(cm$overall["Kappa"]),
+    sensitivity= unname(cm$byClass["Sensitivity"]),
+    specificity= unname(cm$byClass["Specificity"])
+  )
+})
+
+# Train-set summary for the data tab
+train_summary <- bin_df %>%
+  group_by(pace) %>%
+  summarise(
+    n              = n(),
+    mean_distance  = round(mean(distance), 1),
+    mean_speed_ms  = round(mean(average_speed), 2),
+    mean_pace_min  = round(mean((moving_time/60) / (distance/1000)), 2),
+    mean_elevation = round(mean(total_elevation_gain), 1),
+    .groups = "drop"
+  )
+
+# Helpers --------------------------------------------------------------------
+build_new_obs <- function(distance_m, moving_time_s, elapsed_time_s, elevation_m) {
+  data.frame(
+    log_distance    = log1p(distance_m),
+    log_moving_time = log1p(moving_time_s),
+    log_elevation   = log1p(elevation_m),
+    rest_ratio      = (elapsed_time_s - moving_time_s) / max(elapsed_time_s, 1)
+  )
+}
+
+scale_new_obs <- function(new_obs) {
+  predict(preProc, new_obs)
+}
+```
+
+```{r styles, results='asis'}
+cat("<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=Space+Grotesk:wght@500;700&display=swap');
+
+:root {
+  --bg: #f1f3f5;
+  --surface: #ffffff;
+  --surface-soft: #f8fafc;
+  --ink: #1f2937;
+  --ink-soft: #6b7280;
+  --brand: #0f766e;
+  --brand-dark: #0a4f4a;
+  --slow: #c2410c;
+  --fast: #0f766e;
+  --stroke: #e5e7eb;
+  --radius: 18px;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+
+h1, h2, h3, h4 {
+  font-family: 'Space Grotesk', sans-serif;
+  letter-spacing: -0.015em;
+}
+
+.title, .author, .date { display: none; }
+
+.site-wrap { max-width: 1360px; margin: 0 auto; padding: 1.2rem; }
+
+.app-shell {
+  background: var(--surface-soft);
+  border: 1px solid var(--stroke);
+  border-radius: 22px;
+  padding: 0.9rem;
+  box-shadow: 0 22px 40px rgba(17, 24, 39, 0.08);
+}
+
+.app-grid { display: grid; grid-template-columns: 250px 1fr; gap: 0.8rem; }
+
+.sidebar-shell {
+  position: sticky; top: 10px;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  color: var(--ink); padding: 1rem;
+  min-height: calc(100vh - 64px);
+}
+
+.sidebar-head {
+  padding-bottom: 0.8rem;
+  border-bottom: 1px solid var(--stroke);
+  margin-bottom: 0.9rem;
+  display: flex; align-items: center; gap: 0.6rem;
+}
+
+.sidebar-head h3 { margin: 0; font-size: 1.02rem; }
+.sidebar-head p  { margin: 0.1rem 0 0; color: var(--ink-soft); font-size: 0.82rem; }
+
+.brand-dot {
+  width: 34px; height: 34px; border-radius: 10px;
+  background: linear-gradient(140deg, #10b981 0%, #0f766e 100%);
+}
+
+.menu-label {
+  margin: 0 0 0.4rem; font-size: 0.72rem;
+  letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.sidebar-shell .form-group > label { display: none; }
+.sidebar-shell .radio { margin: 0; }
+.sidebar-shell .radio label {
+  display: block; border-radius: 10px;
+  padding: 0.55rem 0.65rem; color: var(--ink);
+  transition: background-color 0.2s ease;
+}
+.sidebar-shell .radio label:hover { background: #eef2f7; }
+.sidebar-shell .radio input[type='radio'] { margin-top: 0; }
+
+.main-shell { min-width: 0; }
+
+.topbar {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 0.6rem 0.8rem; margin-bottom: 0.8rem;
+  display: flex; justify-content: flex-end;
+  align-items: center; gap: 0.8rem;
+}
+
+.profile-chip {
+  background: #ffffff; border: 1px solid var(--stroke);
+  border-radius: 999px; padding: 0.35rem 0.8rem; font-size: 0.86rem;
+}
+
+.hero {
+  border-radius: var(--radius);
+  border: 1px solid var(--stroke);
+  background: linear-gradient(130deg, #f0fdf4 0%, #ecfdf5 30%, #ffffff 100%);
+  color: var(--ink); padding: 1.1rem 1.2rem; margin-bottom: 0.9rem;
+}
+
+.hero h2 { margin: 0 0 0.2rem; font-size: clamp(1.25rem, 2.2vw, 1.9rem); }
+.hero p  { margin: 0; color: var(--ink-soft); }
+
+.web-card {
+  background: var(--surface);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  padding: 1rem 1rem 0.95rem;
+  margin-bottom: 0.8rem;
+}
+
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(160px, 1fr));
+  gap: 0.65rem;
+}
+
+.kpi-card {
+  background: #f9fafb; border-radius: 12px;
+  border: 1px solid var(--stroke); padding: 0.75rem;
+}
+
+.kpi-label {
+  font-size: 0.75rem; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--ink-soft); margin: 0;
+}
+
+.kpi-value {
+  font-size: 1.4rem; font-weight: 700;
+  color: #111827; margin: 0.2rem 0 0;
+}
+
+.predict-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 0.65rem;
+  margin-bottom: 0.65rem;
+}
+
+.predict-result {
+  border: 1px solid var(--stroke);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+  margin-bottom: 0.6rem;
+  text-align: center;
+}
+
+.predict-result.slow {
+  background: linear-gradient(130deg, #fff7ed 0%, #ffedd5 100%);
+  border-color: #fb923c;
+}
+
+.predict-result.fast {
+  background: linear-gradient(130deg, #ecfdf5 0%, #d1fae5 100%);
+  border-color: #10b981;
+}
+
+.predict-headline {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 2rem; font-weight: 700; margin: 0;
+}
+
+.predict-headline.slow { color: var(--slow); }
+.predict-headline.fast { color: var(--fast); }
+
+.predict-sub { color: var(--ink-soft); font-size: 0.92rem; margin: 0.3rem 0 0; }
+
+.layout-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 0.8rem; }
+.analysis-grid { display: grid; grid-template-columns: repeat(3, minmax(220px, 1fr)); gap: 0.8rem; }
+
+.cm-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; margin-bottom: 0.6rem; }
+.cm-pill {
+  border: 1px solid var(--stroke); border-radius: 12px;
+  padding: 0.55rem 0.65rem; background: #f9fafb;
+}
+.cm-pill-title { margin: 0; font-size: 0.73rem; color: var(--ink-soft); text-transform: uppercase; letter-spacing: 0.04em; }
+.cm-pill-value { margin: 0.15rem 0 0; font-size: 1.15rem; font-weight: 700; color: #111827; }
+
+.footer-note { text-align: center; color: var(--ink-soft); font-size: 0.85rem; margin-top: 0.2rem; }
+
+@media (max-width: 992px) {
+  .app-grid, .layout-grid, .analysis-grid, .predict-grid, .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+  .sidebar-shell { position: relative; top: 0; }
+}
+</style>")
+```
+
+```{r site-ui}
+div(
+  class = "site-wrap",
+  div(
+    class = "app-shell",
+    div(
+      class = "app-grid",
+      div(
+        class = "sidebar-shell",
+        div(
+          class = "sidebar-head",
+          div(class = "brand-dot"),
+          div(
+            h3("Pace Predictor"),
+            p("Slow vs Fast — Strava")
+          )
+        ),
+        tags$p(class = "menu-label", "Menu"),
+        radioButtons(
+          "sidebar_page",
+          "Navigate",
+          choices = c("Predictor"   = "predictor",
+                      "Performance" = "performance",
+                      "Data"        = "data"),
+          selected = "predictor"
+        ),
+        tags$hr(),
+        tags$p(class = "menu-label", "Model"),
+        radioButtons(
+          "model_choice",
+          NULL,
+          choices  = c("Random Forest", "CART", "kNN"),
+          selected = "Random Forest"
+        )
+      ),
+      div(
+        class = "main-shell",
+        div(
+          class = "topbar",
+          div(class = "profile-chip", "Group 4")
+        ),
+
+        # ---- PREDICTOR PAGE ------------------------------------------------
+        conditionalPanel(
+          condition = "input.sidebar_page == 'predictor'",
+          div(
+            class = "hero",
+            h2("Predict a Run"),
+            p("Enter run telemetry. The selected model classifies it as Slow (bottom-tertile pace) or Fast (top-tertile pace).")
+          ),
+          div(
+            class = "web-card",
+            h3("Run Inputs"),
+            div(
+              class = "predict-grid",
+              numericInput("in_distance",  "Distance (m)",
+                           value = 5000, min = 100, max = 50000, step = 100),
+              numericInput("in_moving",    "Moving Time (s)",
+                           value = 1800, min = 60,  max = 30000, step = 30),
+              numericInput("in_elapsed",   "Elapsed Time (s)",
+                           value = 1900, min = 60,  max = 30000, step = 30),
+              numericInput("in_elevation", "Total Elevation Gain (m)",
+                           value = 20,   min = 0,   max = 2000,  step = 1)
+            )
+          ),
+          div(
+            class = "web-card",
+            h3("Prediction"),
+            uiOutput("prediction_card")
+          ),
+          div(
+            class = "layout-grid",
+            div(
+              class = "web-card",
+              h3("Probability Breakdown"),
+              plotlyOutput("prob_plot", height = "260px")
+            ),
+            div(
+              class = "web-card",
+              h3("Model Agreement"),
+              p("How the three trained models classify the same run."),
+              DTOutput("agreement_table")
+            )
+          ),
+          div(
+            class = "web-card",
+            h3("Where Does This Run Sit?"),
+            p("Red star = your run. Coloured points = training-set runs (Slow/Fast)."),
+            plotlyOutput("scatter_plot", height = "360px")
+          )
+        ),
+
+        # ---- PERFORMANCE PAGE ----------------------------------------------
+        conditionalPanel(
+          condition = "input.sidebar_page == 'performance'",
+          div(
+            class = "hero",
+            h2("Model Performance"),
+            p("Hold-out test-set metrics. Switch the active model in the sidebar.")
+          ),
+          div(class = "web-card", h3("KPIs"),  uiOutput("kpi_cards")),
+          div(
+            class = "analysis-grid",
+            div(
+              class = "web-card",
+              h3("Confusion Matrix"),
+              uiOutput("cm_breakdown"),
+              DTOutput("cm_table")
+            ),
+            div(
+              class = "web-card",
+              h3("Predicted vs. Actual"),
+              plotlyOutput("cm_heatmap", height = "260px")
+            ),
+            div(
+              class = "web-card",
+              h3("Cross-Model Comparison"),
+              DTOutput("compare_table")
+            )
+          ),
+          div(
+            class = "web-card",
+            h3("Variable Importance (Random Forest)"),
+            plotlyOutput("varimp_plot", height = "260px")
+          )
+        ),
+
+        # ---- DATA PAGE -----------------------------------------------------
+        conditionalPanel(
+          condition = "input.sidebar_page == 'data'",
+          div(
+            class = "hero",
+            h2("Training Data"),
+            p("Inspect the cleaned, binary-tier dataset used to train the predictor.")
+          ),
+          div(
+            class = "web-card",
+            h3("Class Summary"),
+            DTOutput("class_summary_table")
+          ),
+          div(
+            class = "web-card",
+            h3("Full Run Frame"),
+            DTOutput("full_data_table")
+          ),
+          div(
+            class = "web-card",
+            h3("Feature Distributions by Class"),
+            plotlyOutput("dist_plot", height = "320px")
+          )
+        )
+      )
+    )
+  ),
+  div(class = "footer-note",
+      "Pace Predictor Dashboard | Strava binary pace classifier | Built with Shiny")
+)
+```
+
+```{r server, include=FALSE}
+active_model <- reactive({ models[[input$model_choice]] })
+active_eval  <- reactive({ model_eval[[input$model_choice]] })
+
+new_obs <- reactive({
+  req(input$in_distance, input$in_moving, input$in_elapsed, input$in_elevation)
+  build_new_obs(input$in_distance, input$in_moving,
+                input$in_elapsed,  input$in_elevation)
+})
+
+new_obs_scaled <- reactive({ scale_new_obs(new_obs()) })
+
+prediction <- reactive({
+  fit  <- active_model()
+  obs  <- new_obs_scaled()
+  pred <- predict(fit, obs)
+  prob <- predict(fit, obs, type = "prob")
+  list(class = as.character(pred[1]),
+       prob_slow = prob[1, "Slow"],
+       prob_fast = prob[1, "Fast"])
+})
+
+# ---- Predictor page outputs -----------------------------------------------
+output$prediction_card <- renderUI({
+  p <- prediction()
+  cls <- tolower(p$class)
+  div(
+    class = paste("predict-result", cls),
+    tags$p(class = paste("predict-headline", cls), p$class),
+    tags$p(class = "predict-sub",
+           sprintf("Model: %s   |   P(Fast) = %.1f%%   |   P(Slow) = %.1f%%",
+                   input$model_choice, 100*p$prob_fast, 100*p$prob_slow))
+  )
+})
+
+output$prob_plot <- renderPlotly({
+  p <- prediction()
+  df <- data.frame(class = c("Slow","Fast"),
+                   prob  = c(p$prob_slow, p$prob_fast))
+  df$class <- factor(df$class, levels = c("Slow","Fast"))
+  pl <- ggplot(df, aes(x = class, y = prob, fill = class,
+                       text = paste0(class, ": ", percent(prob, accuracy = 0.1)))) +
+    geom_col(width = 0.6) +
+    geom_text(aes(label = percent(prob, accuracy = 0.1)),
+              vjust = -0.4, fontface = "bold") +
+    scale_fill_manual(values = c("Slow" = "#c2410c", "Fast" = "#0f766e")) +
+    scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1.05)) +
+    labs(x = NULL, y = "Probability") +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "none",
+          panel.grid.minor = element_blank(),
+          plot.background = element_rect(fill = "transparent", color = NA))
+  ggplotly(pl, tooltip = "text") %>%
+    layout(margin = list(l = 45, r = 10, t = 10, b = 35))
+})
+
+output$agreement_table <- renderDT({
+  obs_s <- new_obs_scaled()
+  rows  <- lapply(names(models), function(nm) {
+    fit  <- models[[nm]]
+    pred <- predict(fit, obs_s)
+    prob <- predict(fit, obs_s, type = "prob")
+    data.frame(Model = nm,
+               Prediction = as.character(pred[1]),
+               `P(Slow)` = sprintf("%.1f%%", 100 * prob[1, "Slow"]),
+               `P(Fast)` = sprintf("%.1f%%", 100 * prob[1, "Fast"]),
+               check.names = FALSE)
+  })
+  datatable(do.call(rbind, rows),
+            options = list(dom = "t", ordering = FALSE),
+            rownames = FALSE)
+})
+
+output$scatter_plot <- renderPlotly({
+  pl_df <- bin_df %>%
+    mutate(pace_min_per_km = (moving_time/60) / (distance/1000))
+  user_pace <- (input$in_moving / 60) / (input$in_distance / 1000)
+  user_df <- data.frame(distance = input$in_distance,
+                        pace_min_per_km = user_pace,
+                        pace = "Input")
+  pl <- ggplot(pl_df, aes(x = distance, y = pace_min_per_km, color = pace,
+                          text = paste0("Distance: ", round(distance), " m<br>",
+                                        "Pace: ", round(pace_min_per_km, 2), " min/km<br>",
+                                        "Class: ", pace))) +
+    geom_point(size = 2.4, alpha = 0.85) +
+    geom_point(data = user_df, color = "#dc2626", size = 5,
+               shape = 8, stroke = 1.4,
+               inherit.aes = FALSE,
+               aes(x = distance, y = pace_min_per_km,
+                   text = paste0("YOUR RUN<br>Distance: ", round(distance), " m<br>",
+                                 "Pace: ", round(pace_min_per_km, 2), " min/km"))) +
+    scale_color_manual(values = c("Slow" = "#c2410c", "Fast" = "#0f766e")) +
+    scale_y_reverse() +   # faster pace = smaller min/km, plot up
+    labs(x = "Distance (m)", y = "Pace (min/km, reversed)", color = "Class") +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.minor = element_blank(),
+          plot.background = element_rect(fill = "transparent", color = NA))
+  ggplotly(pl, tooltip = "text") %>%
+    layout(margin = list(l = 50, r = 10, t = 10, b = 40))
+})
+
+# ---- Performance page outputs ---------------------------------------------
+output$kpi_cards <- renderUI({
+  e <- active_eval()
+  card <- function(label, val) {
+    div(class = "kpi-card",
+        tags$p(class = "kpi-label", label),
+        tags$p(class = "kpi-value", val))
+  }
+  div(class = "kpi-grid",
+      card("Accuracy",    sprintf("%.1f%%", 100 * e$accuracy)),
+      card("Sensitivity (Fast)", sprintf("%.1f%%", 100 * e$sensitivity)),
+      card("Specificity (Slow)", sprintf("%.1f%%", 100 * e$specificity)),
+      card("Cohen's Kappa",      sprintf("%.2f",   e$kappa)))
+})
+
+output$cm_breakdown <- renderUI({
+  cm <- active_eval()$cm_table
+  tp <- if (all(c("Fast","Fast") %in% c(rownames(cm), colnames(cm)))) cm["Fast","Fast"] else 0
+  tn <- if (all(c("Slow","Slow") %in% c(rownames(cm), colnames(cm)))) cm["Slow","Slow"] else 0
+  fp <- if (all(c("Fast","Slow") %in% c(rownames(cm), colnames(cm)))) cm["Fast","Slow"] else 0
+  fn <- if (all(c("Slow","Fast") %in% c(rownames(cm), colnames(cm)))) cm["Slow","Fast"] else 0
+  pill <- function(label, value) {
+    div(class = "cm-pill",
+        tags$p(class = "cm-pill-title", label),
+        tags$p(class = "cm-pill-value", as.character(value)))
+  }
+  div(class = "cm-grid",
+      pill("True Positive (Fast → Fast)", tp),
+      pill("False Positive (Slow → Fast)", fp),
+      pill("True Negative (Slow → Slow)", tn),
+      pill("False Negative (Fast → Slow)", fn))
+})
+
+output$cm_table <- renderDT({
+  datatable(active_eval()$cm_table,
+            options = list(dom = "t", ordering = FALSE),
+            rownames = TRUE)
+})
+
+output$cm_heatmap <- renderPlotly({
+  e   <- active_eval()
+  cm  <- as.data.frame(e$cm$table)
+  names(cm) <- c("Predicted","Actual","Count")
+  cm$Type <- ifelse(cm$Predicted == cm$Actual, "Correct", "Incorrect")
+  pl <- ggplot(cm, aes(x = Actual, y = Predicted, fill = Count,
+                       text = paste0("Actual: ", Actual,
+                                     "<br>Predicted: ", Predicted,
+                                     "<br>Count: ", Count, "<br>", Type))) +
+    geom_tile(color = "white", linewidth = 1) +
+    geom_text(aes(label = Count), color = "#111827",
+              fontface = "bold", size = 5) +
+    scale_fill_gradient(low = "#d1fae5", high = "#047857") +
+    labs(x = "Actual Class", y = "Predicted Class") +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid = element_blank(),
+          legend.position = "none",
+          plot.background = element_rect(fill = "transparent", color = NA))
+  ggplotly(pl, tooltip = "text") %>%
+    layout(margin = list(l = 50, r = 10, t = 10, b = 40))
+})
+
+output$compare_table <- renderDT({
+  rows <- do.call(rbind, lapply(names(model_eval), function(nm) {
+    e <- model_eval[[nm]]
+    data.frame(Model = nm,
+               Accuracy    = sprintf("%.1f%%", 100 * e$accuracy),
+               Sensitivity = sprintf("%.1f%%", 100 * e$sensitivity),
+               Specificity = sprintf("%.1f%%", 100 * e$specificity),
+               Kappa       = sprintf("%.2f",   e$kappa))
+  }))
+  datatable(rows,
+            options = list(dom = "t", ordering = FALSE),
+            rownames = FALSE)
+})
+
+output$varimp_plot <- renderPlotly({
+  imp <- varImp(rf_fit)$importance
+  imp_df <- data.frame(Variable = rownames(imp),
+                       Importance = imp[, 1])
+  imp_df <- imp_df[order(imp_df$Importance), ]
+  imp_df$Variable <- factor(imp_df$Variable, levels = imp_df$Variable)
+  pl <- ggplot(imp_df, aes(x = Importance, y = Variable,
+                           text = paste0(Variable, ": ", round(Importance, 1)))) +
+    geom_col(fill = "#0f766e") +
+    labs(x = "Importance (Random Forest)", y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(panel.grid.minor = element_blank(),
+          plot.background = element_rect(fill = "transparent", color = NA))
+  ggplotly(pl, tooltip = "text") %>%
+    layout(margin = list(l = 100, r = 10, t = 10, b = 40))
+})
+
+# ---- Data page outputs ----------------------------------------------------
+output$class_summary_table <- renderDT({
+  datatable(train_summary,
+            options = list(dom = "t", ordering = FALSE),
+            rownames = FALSE,
+            colnames = c("Pace Class", "n",
+                         "Mean Distance (m)",
+                         "Mean Speed (m/s)",
+                         "Mean Pace (min/km)",
+                         "Mean Elevation (m)"))
+})
+
+output$full_data_table <- renderDT({
+  show_df <- bin_df %>%
+    transmute(pace,
+              distance = round(distance, 1),
+              moving_time, elapsed_time,
+              total_elevation_gain,
+              average_speed = round(average_speed, 3),
+              rest_ratio    = round(rest_ratio, 3))
+  datatable(show_df,
+            options = list(pageLength = 8, scrollX = TRUE),
+            rownames = FALSE)
+})
+
+output$dist_plot <- renderPlotly({
+  long_df <- bin_df %>%
+    select(pace, distance, moving_time, total_elevation_gain, rest_ratio) %>%
+    pivot_longer(-pace, names_to = "feature", values_to = "value")
+  pl <- ggplot(long_df, aes(x = pace, y = value, fill = pace)) +
+    geom_boxplot(alpha = 0.85, outlier.size = 1) +
+    facet_wrap(~ feature, scales = "free_y", ncol = 4) +
+    scale_fill_manual(values = c("Slow" = "#c2410c", "Fast" = "#0f766e")) +
+    labs(x = NULL, y = NULL) +
+    theme_minimal(base_size = 12) +
+    theme(legend.position = "none",
+          strip.text = element_text(face = "bold"),
+          plot.background = element_rect(fill = "transparent", color = NA))
+  ggplotly(pl) %>%
+    layout(margin = list(l = 40, r = 10, t = 30, b = 30))
+})
+```
