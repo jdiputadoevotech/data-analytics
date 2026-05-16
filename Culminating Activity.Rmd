@@ -21,8 +21,10 @@ invisible(lapply(needed, library, character.only = TRUE))
 ```
 
 # Abstract
+This study investigates the efficacy of supervised machine learning in the automated recognition of athletic activities using personal telemetry data. Utilizing a dataset of 105 records exported from Strava, the research aims to classify activities into their respective sport types (e.g., Run, Walk, Hike) based on four specific telemetry predictors: distance, moving time, elapsed time, and total elevation gain. The primary modeling approach utilizes the k-Nearest Neighbors (kNN) algorithm, with hyperparameters tuned via 10-fold cross-validation. Data preprocessing involves handling missing values and the critical step of feature scaling (centering and scaling) to ensure unit-independent distance calculations. The study evaluates the model's performance using a 70/30 train-test split and assesses accuracy through a confusion matrix. The findings provide insight into how basic GPS-derived metrics can serve as distinct digital signatures for different types of human movement.
 
 # Chapter 1: Introduction
+
 
 ## 1.1 Background of the Study
 
