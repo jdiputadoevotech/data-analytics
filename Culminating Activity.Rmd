@@ -10,67 +10,67 @@ knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 ```
 
 # Abstract
-This study investigates the efficacy of supervised machine learning in the automated recognition of athletic activities using personal telemetry data. Utilizing a dataset of 105 records exported from Strava, the research aims to classify activities into their respective sport types (e.g., Run, Walk, Hike) based on four specific telemetry predictors: distance, moving time, elapsed time, and total elevation gain. The primary modeling approach utilizes the k-Nearest Neighbors (kNN) algorithm, with hyperparameters tuned via 10-fold cross-validation. Data preprocessing involves handling missing values and the critical step of feature scaling (centering and scaling) to ensure unit-independent distance calculations. The study evaluates the model's performance using a 70/30 train-test split and assesses accuracy through a confusion matrix. The findings provide insight into how basic GPS-derived metrics can serve as distinct digital signatures for different types of human movement.
+This study develops and evaluates a Classification and Regression Tree (CART) model for predicting binary running pace tier — Slow vs. Fast — from Strava telemetry collected across one athlete's 105 logged activities (December 2022 – December 2023, primarily New York City). Raw data preprocessing involved restricting the analysis to Run-type activities, deriving pace tiers from tertiles of average_speed, applying log transformations to skewed predictors, and centering and scaling all numeric features. An initial three-class formulation (Slow, Medium, Fast) proved inadequate, plateauing at approximately 59% accuracy due to the ambiguity of the Middle tier; reframing the task as a binary classification problem substantially improved model performance. Four predictors were used — log-transformed distance, log-transformed moving time, log-transformed elevation gain, and rest ratio — with average_speed excluded to prevent target leakage. The CART classifier was tuned via repeated 10-fold cross-validation over a grid of complexity parameter (cp) values. On the held-out test set, CART achieved an accuracy of 88.9%, with strong sensitivity and specificity scores and a Cohen's kappa indicating substantial agreement beyond chance. The learned decision tree produced a single, interpretable split on log-transformed moving time, identifying it as the dominant contextual driver of running pace tier. These results demonstrate that even a small, single-athlete dataset can support a reliable and transparent pace classifier, with practical implications for fitness application developers seeking lightweight activity auto-tagging solutions.
 
 # Chapter 1: Introduction
 
 
 ## 1.1 Background of the Study
 
-The growth of GPS wearables and platforms like Strava has led to an increase in high-resolution athletic telemetry. These devices capture core metrics such as distance, duration, and elevation. In fitness software development, automatically categorizing these data streams into specific sport types—known as Human Activity Recognition (HAR)—is essential for features like auto-tagging and personalized training feedback (Cai et al., 2024; Arora et al., 2023).
+Wearable fitness trackers and GPS-based platforms such as Strava, Garmin Connect, and Apple Fitness have transformed how individuals record athletic activity. Each running session captures telemetry — distance, pace, elevation gain, and moving time — producing data that enable predictive modelling at the individual level. Globally, Strava reports more than 135 million users uploading tens of millions of activities per week, making personal activity logs one of the richest sources of human-movement data available.
 
-Supervised machine learning offers a method to automate this classification. By using physical attributes as predictors, models can identify the distinct "digital signatures" that differentiate a "Run" from a "Walk" or "Hike." The k-Nearest Neighbors (kNN) algorithm is a proven method for HAR due to its effectiveness in pattern recognition (Shaban, 2025; Thongsri et al., 2021). However, because kNN calculates similarity based on distance, feature scaling is a mandatory preprocessing step to ensure that different units (e.g., meters vs. minutes) do not bias the model (De Carvalho et al., 2025; Pratama et al., 2024).
+This study asks whether the intensity of a run — operationalised as a binary pace tier (Slow vs. Fast) — can be inferred from contextual telemetry alone. Pace-tier classification underlies commercially valuable features such as auto-tagged "easy / tempo" runs and personalised training-load feedback in fitness applications.
 
-This study uses 105 activity records to test a predictive pipeline. The goal is to demonstrate how basic movement data can be used to accurately classify athletic activities without manual user input.
+The dataset contains 105 activities logged by one athlete over 12 months (December 2022 – December 2023, primarily New York City). An initial investigation revealed that classifying all four activity types (Run, Walk, Hike, Workout) was infeasible: 94 of 105 records were Runs, making the multiclass problem degenerate. The study was therefore refocused on classifying how fast each run was. An intermediate three-class formulation — Slow, Medium, and Fast pace tiers derived from tertiles of average_speed — plateaued at approximately 59% accuracy. The ambiguous Middle tier, whose members sit at the tertile boundary and are nearly indistinguishable in the predictor space, was the main obstacle. Dropping the Middle tier and reframing the task as a binary Slow vs. Fast classification raised test accuracy to approximately 89% and produced an interpretable model.
+
+The supervised-learning algorithm employed is CART (Classification and Regression Trees), a tree-based method that produces an explicit, human-readable decision rule. CART achieved a test accuracy of 0.889 on the held-out set, and its single split on log-transformed moving time reveals the dominant driver of running pace in a form that can be understood without statistical expertise — combining strong predictive performance with full interpretability.You said: and the rest of the sections
 
 ## 1.2 Statement of the Problem
 
-The primary challenge addressed in this study is to determine if a computer can accurately distinguish between different athletic activities using only basic movement telemetry, without the need for manual user input.
+The general problem is: Can binary running pace tier (Slow vs. Fast) be accurately predicted from Strava telemetry using CART?
 
-Specifically, the study seeks to answer the following questions:
-1. What are the descriptive characteristics (mean, range, and distribution) of the four primary predictors—Distance, Moving Time, Elapsed Time, and Total Elevation Gain—within this personal Strava dataset?
-2. To what extent can the k-Nearest Neighbors (kNN) algorithm accurately classify the sport type using these four telemetry variables?
-3. How does the accuracy of the model change across different values of k (neighbors), and which k value is optimal for this specific dataset?
-4. Does the necessity of feature scaling (centering and scaling) significantly impact the model's ability to interpret variables with vastly different ranges, such as distance in meters versus elevation in meters?
-5. Based on the Confusion Matrix results, which activity types are most frequently misclassified by the algorithm?
+Specifically:
+1. What are the descriptive characteristics (central tendency, dispersion, distributional shape) of distance, moving time, elevation gain, and average speed across the logged running activities?
+2. How accurately can a CART classifier predict whether a run is Slow or Fast, given log-transformed distance, moving time, elevation gain, and rest ratio?
+3. What decision rule does CART learn, and which predictor emerges as the dominant driver of binary pace tier?
 
 ## 1.3 Objectives of the Study
 
 ### General Objective
-
-To implement and evaluate a k-Nearest Neighbors (kNN) classification model to accurately predict athletic sport types based on Strava telemetry data.
+To develop and evaluate a CART classifier that predicts binary running pace tier (Slow vs. Fast) from Strava telemetry.
 
 ### Specific Objectives
-
-1. To describe the dataset through statistical summaries of the four telemetry predictors.
-2. To preprocess the raw data by removing missing values and applying feature scaling (centering and scaling) to ensure the kNN algorithm treats all predictors with equal weight.
-3. To partition the data into a training set (70%) and a testing set (30%) using stratified sampling.
-4. To tune the kNN model by testing a sequence of k values (from 1 to 15) using 10-fold cross-validation to find the highest classification accuracy.
-5. To evaluate the final model using a Confusion Matrix to report Accuracy and identify specific patterns of classification error between sport types.
+1. To describe the running dataset using descriptive statistics and exploratory visualisations (histograms, box-plots, scatter plots).
+2. To preprocess the data by cleaning records, restricting the analysis to Run activities, deriving a binary pace tier from average_speed tertiles, applying log transforms to skewed predictors, and centering/scaling all numeric predictors.
+3. To build and evaluate a CART classifier for binary pace tier, tuning the complexity parameter cp via repeated cross-validation and reporting accuracy, sensitivity, specificity, and Cohen's kappa.
+4. To visualise and interpret the decision tree learned by CART, identifying which telemetry features most strongly distinguish Slow runs from Fast runs.
 
 
 ## 1.4 Hypotheses
 
-H0 : GPS telemetry data (distance, time, and elevation) provide no significant predictive power in distinguishing between athletic activity types using a kNN model.
-Ha : GPS telemetry data provide significant predictive power, allowing the kNN model to achieve high classification accuracy across different sport types
+H0 : The CART classifier performs no better than a naïve baseline (majority-class classifier) in predicting binary running pace tier (Slow vs. Fast).
+Ha : The CART classifier significantly outperforms the naïve baseline in classification accuracy.
+
+The hypothesis is evaluated at the α=0.05\alpha = 0.05
+α=0.05 level of significance.
 
 ## 1.5 Significance of the Study
 
-For Athletes: Demonstrates how their "movement signature" is captured by data, highlighting which metrics (like elevation vs. time) define their various workout types.
-For Data Science Students: Provides a clear, reproducible example of the kNN classification workflow, specifically emphasizing the importance of Cross-Validation and Feature Scaling in distance-based algorithms.
-For App Developers: Validates the use of lightweight, supervised models for the automation of activity recognition features in mobile fitness applications.
-
+Self-tracking athletes may use the model's findings to better understand which contextual factors drive run intensity, supporting more informed pace goal-setting and training structure.
+Fitness-application developers may draw from this study's approach to build lightweight, interpretable activity auto-classification features on small per-user datasets.
+Predictive-analytics students and educators may use this work as a practical, end-to-end reference for applying the supervised-learning pipeline to real-world, messy data using decision trees.
 
 ## 1.6 Scope and Limitations
 
-**Scope.** The study is restricted to a personal dataset of 105 activity records from a single Strava account. The analysis is strictly a Classification task using the target variable sport type. The predictors are limited to the following four telemetry metrics: distance, moving time, elapsed time, and total elevation gain.
+**Scope.** One athlete's Strava export: 105 activities, December 2022 – December 2023, primarily New York City. The binary classification target (Slow vs. Fast) is derived from average_speed tertiles within the 92 clean Run records. The model is limited to CART as covered in the course.
 
 **Limitations.**
 
-1. With only 105 records, the model's ability to learn rare activity types (e.g., "Hike" or "Walk") may be limited compared to the dominant "Run" category.
-2. The findings are specific to the movement patterns of one individual and may not generalize to the broader population.
-3. The study does not include heart rate, cadence, or weather data, which are often used in more complex industry-level classification models.
-
+1. Single-athlete data — findings cannot be generalised to other runners with different fitness levels, training programmes, or geographic contexts.
+2. Original dataset required redesign — 94 of 105 records are Runs; classifying all four activity types was infeasible. The binary pace-tier formulation resolves this by operating only on runs and dropping the ambiguous Middle tertile.
+3. Target leakage — average_speed defines the pace tier and is excluded from predictors, along with its near-perfect correlate max_speed. Classification relies only on contextual telemetry.
+4. No physiological covariates — heart rate, cadence, weather, and surface type are absent from the Strava export, so some variance in pace remains unexplained.
+5. Small sample (n ≈ 62 binary runs after dropping the Middle tier) — model complexity is constrained accordingly; deep trees risk overfitting and the complexity parameter cp is tuned conservatively via cross-validation.
 
 # Chapter 2: Review of Related Literature
 
