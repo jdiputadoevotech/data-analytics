@@ -12,7 +12,7 @@ runtime: shiny
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 
 required_packages <- c("shiny", "bslib", "ggplot2", "caret", "class",
-                       "rpart", "rpart.plot", "randomForest", "kknn",
+                       "rpart", "rpart.plot",
                        "plotly", "DT", "scales", "dplyr", "tidyr")
 new_packages <- required_packages[!(required_packages %in% installed.packages()[, "Package"])]
 if (length(new_packages)) install.packages(new_packages)
@@ -24,8 +24,6 @@ library(caret)
 library(class)
 library(rpart)
 library(rpart.plot)
-library(randomForest)
-library(kknn)
 library(plotly)
 library(DT)
 library(scales)
@@ -77,22 +75,16 @@ ctrl <- trainControl(method = "repeatedcv", number = 10, repeats = 5,
                      classProbs = TRUE, summaryFunction = twoClassSummary)
 
 set.seed(123)
-knn_fit <- train(pace ~ ., data = train_s, method = "knn",
-                 trControl = ctrl, metric = "ROC",
-                 tuneGrid = expand.grid(k = seq(1, 21, 2)))
-
-set.seed(123)
 cart_fit <- train(pace ~ ., data = train_s, method = "rpart",
                   trControl = ctrl, metric = "ROC",
                   tuneGrid = expand.grid(cp = seq(0, 0.2, 0.01)))
 
 set.seed(123)
-rf_fit <- train(pace ~ ., data = train_s, method = "rf",
-                trControl = ctrl, metric = "ROC",
-                tuneGrid = expand.grid(mtry = 1:4),
-                ntree = 500)
+knn_fit <- train(pace ~ ., data = train_s, method = "knn",
+                 trControl = ctrl, metric = "ROC",
+                 tuneGrid = expand.grid(k = seq(1, 21, 2)))
 
-models <- list("Random Forest" = rf_fit, "CART" = cart_fit, "kNN" = knn_fit)
+models <- list("CART" = cart_fit, "kNN" = knn_fit)
 
 # Cached test-set predictions for each model
 model_eval <- lapply(models, function(fit) {
@@ -364,8 +356,8 @@ div(
         radioButtons(
           "model_choice",
           NULL,
-          choices  = c("Random Forest", "CART", "kNN"),
-          selected = "Random Forest"
+          choices  = c("CART", "kNN"),
+          selected = "CART"
         )
       ),
       div(
@@ -413,7 +405,7 @@ div(
             div(
               class = "web-card",
               h3("Model Agreement"),
-              p("How the three trained models classify the same run."),
+              p("How CART and kNN classify the same run."),
               DTOutput("agreement_table")
             )
           ),
@@ -455,7 +447,7 @@ div(
           ),
           div(
             class = "web-card",
-            h3("Variable Importance (Random Forest)"),
+            h3("Variable Importance (CART)"),
             plotlyOutput("varimp_plot", height = "260px")
           )
         ),
@@ -669,7 +661,7 @@ output$compare_table <- renderDT({
 })
 
 output$varimp_plot <- renderPlotly({
-  imp <- varImp(rf_fit)$importance
+  imp <- varImp(cart_fit)$importance
   imp_df <- data.frame(Variable = rownames(imp),
                        Importance = imp[, 1])
   imp_df <- imp_df[order(imp_df$Importance), ]
@@ -677,7 +669,7 @@ output$varimp_plot <- renderPlotly({
   pl <- ggplot(imp_df, aes(x = Importance, y = Variable,
                            text = paste0(Variable, ": ", round(Importance, 1)))) +
     geom_col(fill = "#0f766e") +
-    labs(x = "Importance (Random Forest)", y = NULL) +
+    labs(x = "Importance (CART)", y = NULL) +
     theme_minimal(base_size = 12) +
     theme(panel.grid.minor = element_blank(),
           plot.background = element_rect(fill = "transparent", color = NA))
