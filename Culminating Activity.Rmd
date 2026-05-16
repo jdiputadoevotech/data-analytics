@@ -90,8 +90,8 @@ The hypothesis is evaluated at the $\alpha = 0.05$ level of significance using *
 
 ## 2.1 Suggested Article Clusters
 
-1. **Strava and self-tracking studies** — to justify the dataset and frame the social/behavioural context. *Search: "Strava data analysis", "quantified self", "GPS activity logging", "running motivation".*
-2. **Wearable-device / fitness-tracker analytics** — to ground the variables (distance, speed, elevation). *Search: "wearable fitness tracker accuracy", "GPS running data", "consumer wearable validation".*
+1. **Strava and self-tracking studies** (✓ covered in §2.2–§2.3) — to justify the dataset and frame the social/behavioural context. *Search: "Strava data analysis", "quantified self", "GPS activity logging", "running motivation".*
+2. **Wearable-device / fitness-tracker analytics** (✓ covered in §2.2–§2.3) — to ground the variables (distance, speed, elevation). *Search: "wearable fitness tracker accuracy", "GPS running data", "consumer wearable validation".*
 3. **Activity classification with machine learning** — to justify the kNN/CART approach. *Search: "human activity recognition kNN", "decision tree activity classification", "sport classification GPS".*
 4. **Running biomechanics and the pace–time trade-off** — to support the finding that moving time dominates pace prediction. *Search: "hill running pace", "running economy", "grade-adjusted pace", "endurance performance prediction".*
 
@@ -99,11 +99,25 @@ For each article, write 2–3 sentences: (a) what they studied, (b) what method 
 
 ## 2.2 Related Studies
 
-*Summarise previous empirical research here.*
+**Strava and self-tracking studies.** Kuure, Kähkönen, and Hekkala (2026) examined how social features and application design shape long-term engagement on Strava through sixteen semi-structured interviews analysed thematically under the Unified Theory of Acceptance and Use of Technology 2 (UTAUT2) framework. They report that features which enable social comparison and recognition (kudos, comments, peer visibility of mileage) operate as a "social mirror" that simultaneously fuels habitual use and triggers pressure, comparison anxiety, and disengagement among certain users. Their finding that Strava use is sustained jointly by self-tracking utility and social interaction supports treating a personal Strava export not as raw physiological telemetry but as a *behaviourally meaningful* record — the logs themselves reflect the athlete's pacing decisions and self-presentation behaviour. Complementing this, Kolnes and Øvretveit (2026) conducted a mixed-methods study of 225 active club runners that linked endurance self-efficacy and achievement goal orientations to Strava use patterns and watch-estimated maximal oxygen uptake (VO₂max). They found that runners with greater endurance capacity scored higher on self-efficacy and task-approach goals, and that runners who reported having deleted training sessions because of a perceived slow pace scored significantly higher on other-avoidance goals. This directly grounds *pace* as a behaviourally salient axis in the present study: runners themselves segregate runs by speed, sometimes to the point of curating their public record, which makes binary Slow-versus-Fast classification a categorisation runners already perform implicitly.
+
+**Wearable-device and fitness-tracker analytics.** Bullock et al. (2024) ran a prospective cohort of 475 recreational runners over a four-month period, comparing weekly self-reported running distance and pace against data captured by a commercial Garmin watch via Garmin Connect. Intraclass correlation coefficients indicated *good* reliability for distance (median 0.93) and only *moderate* reliability for pace, with no discernible systematic bias. Their result justifies treating Strava-exported `distance` and `moving_time` as trustworthy predictors while reminding the analyst that pace-derived signals carry more measurement noise — a useful caveat when interpreting the CART model's single split on log-transformed moving time. Fuller et al. (2020) provide the broader validity context in a systematic review of 158 publications across nine commercial wearable brands (Apple, Fitbit, Garmin, Samsung, Polar, and others). They report that wrist-worn wearables measured step count accurately in laboratory settings, that heart-rate accuracy varied considerably across brands and conditions, and that no brand was accurate for energy expenditure. This dual finding explains why the present study confines its predictor set to distance, moving time, and elevation gain (the most reliably captured Strava fields) and deliberately excludes heart-rate and calorie estimates that would otherwise tempt inclusion.
+
+Taken together, these four studies justify the dataset, anchor pace as a behaviourally meaningful target, and bound which Strava fields can reasonably be trusted as model inputs. The next section turns from empirical findings to the theoretical lenses these articles bring to the study.
 
 ## 2.3 Related Literature
 
-*Discuss the underlying theories and concepts (supervised learning theory, distance metrics for kNN, recursive partitioning for CART, cross-validation).*
+The four studies reviewed above invoke several overlapping theoretical lenses that frame *why* a personal Strava export is a defensible research dataset and *how* its variables should be interpreted.
+
+The **Quantified Self** and **mobile-health (mHealth)** traditions provide the umbrella concept that legitimises personal activity logs as research data. Fuller et al. (2020) explicitly situate consumer wearables within this tradition, noting that an estimated 225 million wearables were sold in 2019 and that "Quantified Self" devices have moved fitness tracking from elite-athlete laboratories into everyday recreational use. Kuure et al. (2026) extend the same idea on the social side, characterising Strava as a "social mirror" in which users curate, share, and react to one another's logged activity. Together these framings establish that a one-athlete, one-year Strava export is a record of *intentional self-tracking behaviour*, not an arbitrary data dump.
+
+The **Unified Theory of Acceptance and Use of Technology 2 (UTAUT2)** — originally formulated by Venkatesh and colleagues and applied to fitness apps by Kuure et al. (2026) — explains the *consistency* of such logs. Its constructs of performance expectancy, hedonic motivation, social influence, and habit predict why a user keeps returning to a fitness application across hundreds of sessions. For the present study, UTAUT2 supplies the motivational reason a single athlete generates twelve months of dense, comparable records: the recording behaviour is reinforced by both intrinsic enjoyment and external social cues, producing a dataset stable enough for supervised modelling.
+
+**Achievement-goal theory** in endurance sport — operationalised by Kolnes and Øvretveit (2026) through the 3 × 2 Achievement Goal Questionnaire for Sports — distinguishes task-approach, self-approach, and other-avoidance goals. Their finding that runners with stronger other-avoidance orientations were more likely to delete sessions because of slow pace illustrates that *pace itself is a psychologically loaded variable*: runners attend to it, judge themselves by it, and act on it. This motivates treating pace as the prediction target rather than as a passive descriptor.
+
+Finally, the **criterion validity** and **reliability** vocabulary used by Fuller et al. (2020) — distinguishing intradevice and interdevice reliability and testing wearables against laboratory criterion measures — together with the **intraclass correlation coefficient (ICC)** framework Bullock et al. (2024) apply to weekly distance and pace, supplies the methodological language for deciding which Strava fields can be trusted as model inputs. Distance is well validated; pace and energy-related fields are not. The present study's predictor selection — distance, moving time, elevation gain, and rest ratio, with `average_speed` and `max_speed` excluded — is consistent with this evidence base.
+
+*Note: Sections 2.2 and 2.3 currently synthesise only Clusters 1–2 (Strava / self-tracking and wearable-tracker analytics). Cluster 3 (machine-learning activity classification) and Cluster 4 (running biomechanics and the pace–time trade-off) will be incorporated by the remaining co-authors in a later revision.*
 
 ## 2.4 Conceptual Framework
 
@@ -585,6 +599,14 @@ McNemar's test compares the *paired* error patterns: how often does CART get a p
 # References
 
 *Use APA 7 format. Include the Strava export as a data source, and cite all R packages used:*
+
+Bullock, G., Stocks, J., Feakins, B., Alizadeh, Z., Arundale, A., & Kluzek, S. (2024). Comparing self-reported running distance and pace with a commercial fitness watch data: Reliability study. *JMIR Formative Research, 8*, e39211. https://doi.org/10.2196/39211
+
+Fuller, D., Colwell, E., Low, J., Orychock, K., Tobin, M. A., Simango, B., Buote, R., Van Heerden, D., Luan, H., Cullen, K., Slade, L., & Taylor, N. G. A. (2020). Reliability and validity of commercially available wearable devices for measuring steps, energy expenditure, and heart rate: Systematic review. *JMIR mHealth and uHealth, 8*(9), e18694. https://doi.org/10.2196/18694
+
+Kolnes, M. R., & Øvretveit, K. (2026). A mixed-methods analysis of motivational dynamics and Strava use in active club runners. *Behavioral Sciences, 16*(2), 224. https://doi.org/10.3390/bs16020224
+
+Kuure, O., Kähkönen, K., & Hekkala, R. (2026). The impact of social features and application design on user behavior and long-term engagement of Strava users. In *Proceedings of the 59th Hawaii International Conference on System Sciences* (pp. 3787–3796). https://hdl.handle.net/10125/111850
 
 ```{r citations, echo=TRUE, eval=FALSE}
 citation("caret")
