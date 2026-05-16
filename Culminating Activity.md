@@ -82,121 +82,28 @@ Predictive-analytics students and educators may use this work as a practical, en
 
 1. **Strava and self-tracking studies** (✓ covered in §2.2–§2.3) — to justify the dataset and frame the social/behavioural context. *Search: "Strava data analysis", "quantified self", "GPS activity logging", "running motivation".*
 2. **Wearable-device / fitness-tracker analytics** (✓ covered in §2.2–§2.3) — to ground the variables (distance, speed, elevation). *Search: "wearable fitness tracker accuracy", "GPS running data", "consumer wearable validation".*
-3. **Activity classification with machine learning** — to justify the kNN/CART approach. *Search: "human activity recognition kNN", "decision tree activity classification", "sport classification GPS".*
+3. **Activity classification with machine learning** — to justify the CART approach. *Search: "decision tree activity classification", "interpretable activity recognition", "sport classification GPS".*
 4. **Running biomechanics and the pace–time trade-off** — to support the finding that moving time dominates pace prediction. *Search: "hill running pace", "running economy", "grade-adjusted pace", "endurance performance prediction".*
 
 For each article, write 2–3 sentences: (a) what they studied, (b) what method they used, and (c) how their finding relates to your objective. Aim for 8–12 articles total.
 
 ## 2.2 Related Studies
 
-This section synthesizes empirical research across five key domains: the sociobehavioral context of digital self-tracking, technical validation of wearable sensors, machine learning classification architectures, and predictive performance modeling. Each study is selected for its direct relevance to the research questions posed in Chapter 1.
+This section synthesises four empirical studies that bear directly on the research questions in Chapter 1. The studies were selected because each addresses one of two recurring concerns in the present analysis: *what makes a personal Strava export a meaningful research dataset* (Cluster 1) and *which Strava-exported fields can be trusted as model inputs* (Cluster 2).
 
-### 2.2.1 The Quantified Self Movement and Strava as a Sociotechnical Platform
+### 2.2.1 Strava as a Sociotechnical Platform and the Behavioural Meaning of a Personal Export
 
-Lupton's sociological analysis frames self-tracking as a "practice of selfhood" wherein individuals internalize cultural expectations to monitor and optimize their bodies (Lupton, 2024). The study identified five distinct modes of self-tracking—private, pushed, imposed, exploited, and communal—and demonstrated that Strava exemplifies "participatory surveillance," where athletes voluntarily share data while aware of peer scrutiny. This theoretical grounding is directly relevant to the study's treatment of `athlete_count` and social engagement metrics as potential confounders in activity classification.
+Kuure, Kähkönen, and Hekkala (2026) examined how social features and application design shape long-term engagement on Strava through sixteen semi-structured interviews analysed thematically under the Unified Theory of Acceptance and Use of Technology 2 (UTAUT2) framework. They report that features which enable social comparison and recognition — kudos, comments, peer visibility of mileage — operate as a "social mirror" that simultaneously fuels habitual use and triggers pressure, comparison anxiety, and disengagement among certain users. Their finding that Strava use is sustained jointly by self-tracking utility and social interaction supports treating a personal Strava export not as raw physiological telemetry but as a *behaviourally meaningful* record: the logs themselves reflect the athlete's pacing decisions and self-presentation behaviour. For the present study this means that the 92 Run records analysed are not a passive sensor stream but a curated trace of intentional training sessions, which strengthens the case for treating contextual telemetry (distance, moving time, elevation gain) as a coherent signal worth modelling.
 
-In a longitudinal behavioral study using Stochastic Actor-Oriented Models (SIENA), Spruijt et al. (2023) established a causal link between the receipt of "kudos" (digital social rewards) on Strava and increased running frequency and distance. Athletes receiving more kudos adjusted their behavior to match their "kudos-friends," suggesting that social reinforcement is a significant driver of athletic engagement. The finding supports the inclusion of `athlete_count` as a contextual variable, as social pressure may influence the intensity and type of activities logged.
+### 2.2.2 Pace as a Psychologically Salient Variable in Endurance Sport
 
-### 2.2.2 Technical Validity of Wearable Sensors and GPS Devices
+Kolnes and Øvretveit (2026) conducted a mixed-methods study of 225 active club runners that linked endurance self-efficacy and achievement-goal orientations to Strava use patterns and watch-estimated maximal oxygen uptake (VO₂max). They found that runners with greater endurance capacity scored higher on self-efficacy and task-approach goals, and that runners who reported deleting training sessions because of a perceived slow pace scored significantly higher on other-avoidance goals. This directly grounds *pace* as a behaviourally salient axis in the present study: runners themselves segregate runs by speed, sometimes to the point of curating their public record, which makes the binary Slow-versus-Fast classification a categorisation that runners already perform implicitly. The choice of pace tier as the prediction target in this study therefore aligns with how athletes themselves describe and judge their own running.
 
-Independent validation studies demonstrate substantial variation in consumer wearable accuracy. For resting heart rate, devices like the Oura Gen 4 achieve a concordance correlation coefficient (CCC) of 0.98, while active heart-rate measurement during high-intensity exercise shows greater variability: the Apple Watch achieves 86.3% accuracy compared to electrocardiogram (ECG) standards, while Garmin devices report correlations of only r = 0.52 (Seshadri et al., 2020). These discrepancies arise from motion artifacts inherent to photoplethysmography (PPG) sensors during vigorous arm movement, and research reveals undocumented bias: PPG accuracy is systematically lower in individuals with higher melanin concentrations, a finding absent from most validation studies with predominantly Caucasian samples (Steinhubl et al., 2018).
+### 2.2.3 Validity of Strava-Exported Telemetry Fields
 
-GPS-enabled sport watches report distance-measurement errors ranging from 0.6% to 1.9% under optimal conditions; however, accuracy degrades significantly in "urban canyons" or dense vegetation due to multipath interference, with underestimation reaching up to 9% (Brodie et al., 2022). Conversely, measurements on open track-and-field circuits often show overestimation, attributed to manufacturer autocorrection algorithms designed to compensate for multipath errors. This technical reality motivates the preprocessing step of removing obvious outliers (e.g., the 62,993-second elapsed-time record) and justifies the use of multiple predictors (distance, moving_time, elapsed_time, total_elevation_gain) to capture redundant signal and mitigate sensor noise.
+Bullock et al. (2024) ran a prospective cohort of 475 recreational runners over a four-month period, comparing weekly self-reported running distance and pace against data captured by a commercial Garmin watch via Garmin Connect. Intraclass correlation coefficients indicated *good* reliability for distance (median 0.93) and only *moderate* reliability for pace, with no discernible systematic bias. Their result justifies treating Strava-exported `distance` and `moving_time` as trustworthy predictors while reminding the analyst that pace-derived signals carry more measurement noise — a useful caveat when interpreting the CART model's single split on moving time.
 
-### 2.2.3 Human Activity Recognition (HAR) using k-Nearest Neighbors
-
-In a benchmark study of accelerometer-based activity classification, Mukhopadhyay et al. (2015) applied kNN to 12 daily living activities, including walking and stair ascent, achieving accuracy as high as 99.25%. The critical finding was that optimal k values (typically k = 5) significantly outperformed both k = 1 (prone to overfitting on sensor noise) and k > 20 (prone to underfitting by ignoring local patterns). This study directly informs the hyperparameter tuning protocol employed in Chapter 3, which tests k values from 1 to 15 via 10-fold cross-validation.
-
-In sport-specific applications, Lara et al. (2013) and Vrigkas et al. (2014) used kNN to classify basketball footwork patterns and sprint acceleration stages from accelerometer data, demonstrating that the algorithm's simplicity and ability to capture non-linear decision boundaries make it particularly effective for activity recognition. However, all HAR studies emphasize the mandatory preprocessing step of feature scaling: because kNN computes Euclidean distance, variables with vastly different ranges (e.g., distance in meters versus heart rate in beats per minute) will bias the distance metric toward high-variance features. Thus, centering and scaling of all predictors is essential before model fitting.
-
-### 2.2.4 Classification and Regression Trees (CART) for Activity Recognition
-
-Jones et al. (2021) compared CART against kNN and Support Vector Machines (SVM) for sprint-pattern recognition in track-and-field sports. CART achieved 80–95% accuracy depending on the complexity of the classification task, with a significant advantage in interpretability: the resulting decision tree could be deployed on resource-constrained wearable devices (as little as 15 MB of memory) and provided explicit decision rules for field coaches. The study found that optimized CART algorithms with adaptive feature selection outperformed traditional SVM methods, achieving 94.9% accuracy in identifying technical stages like acceleration and transition phases.
-
-A critical advantage of CART over kNN is that decision trees are inherently interpretable: they produce explicit if–then rules that can be understood by non-technical stakeholders. This aligns with the research objective to identify which activity types are most frequently misclassified and why. In contrast, kNN is a "black-box" approach that provides predictions without explanatory rules.
-
-### 2.2.5 Predictive Modeling of Marathon Running Performance
-
-Cottrell et al. (2022), in a study of amateur marathon runners, demonstrated that baseline running pace, total training volume, intensity distribution, training frequency, and consistency together explain approximately 79.3% of the variance (R² = 0.7933) in marathon finish times, with a root-mean-square error (RMSE) of 18.32 minutes. The finding revealed that the relationship between training volume and performance is non-linear, with diminishing returns at higher volumes, while the percentage of "easy" running (Zone 1) showed accelerating benefits.
-
-In a comparative evaluation of machine learning methods for race-time prediction, Fonseca & Brito (2021) tested both kNN and Artificial Neural Networks (ANN) on a cohort of endurance athletes. kNN achieved a mean absolute error (MAE) of 2.4% with extremely high correlation (r > 0.98) to actual race times, while ANN achieved MAE of 5.6% with r = 0.918. The superiority of kNN suggests that endurance performance is highly idiosyncratic: "learning by analogy" (matching a runner's training profile to similar historical profiles) is more effective than mapping complex non-linear interactions via traditional neural networks (Fonseca & Brito, 2021). This finding provides indirect support for the choice of kNN as the primary classifier in this study.
-
-### 2.2.6 Biomechanical Modeling: The Elevation–Pace Trade-Off
-
-Minetti et al. (2002) developed a polynomial energy-cost model quantifying how metabolic demand increases non-linearly with terrain gradient. The model reveals that running uphill at 5% grade requires approximately 1.30× the energy of flat running, 10% grade requires 1.66×, and 15% grade requires 2.06×. Conversely, downhill running exhibits a U-shaped cost curve: energy cost decreases until approximately −10% to −20% grade, beyond which it rises again due to eccentric braking demands. These biomechanical constraints validate the inclusion of `total_elevation_gain` as a meaningful predictor in both activity classification and speed prediction tasks.
-
-The "hill tax"—the metabolic cost of climbing—is estimated at approximately 1.31 ml of O₂ per meter of climb per kilogram of body mass. This quantitative relationship is foundational for "Grade-Adjusted Pace" (GAP) calculations, which normalize running efforts across varying terrain. However, Strava's Digital Elevation Model (DEM) operates at 10-meter horizontal resolution, causing systematic underestimation of rolling terrain features and switchbacks. This limitation justifies the preprocessing decision to filter out obvious elevation outliers and emphasizes that no single predictor (distance, moving_time, elevation_gain) is sufficient in isolation to classify or predict outcomes reliably.
-
-## 2.3 Related Literature
-
-This section discusses the theoretical foundations of the statistical and machine learning methodologies employed in this study, grounding the preprocessing and modeling choices in established statistical and computational theory.
-
-### 2.3.1 Supervised Learning: Classification and Regression Tasks
-
-Supervised learning is a paradigm wherein a model is trained on labeled data to learn a mapping from input features (predictors) to output targets (responses). In classification tasks, the target is categorical (e.g., activity type: Run, Walk, Hike); in regression tasks, the target is continuous (e.g., average speed). The fundamental principle is that a model is fit on a training set and evaluated on a held-out test set to estimate generalization error—the expected performance on unseen data (Hastie et al., 2009). The train–test split (70–30 in this study) is a standard technique to avoid overfitting, wherein a model memorizes the training data rather than learning generalizable patterns.
-
-Cross-validation extends this idea: the training set is repeatedly partitioned into k folds, and a model is trained k times, each time on k−1 folds and evaluated on the held-out fold. The average test-set error across all k iterations is an unbiased estimator of generalization error and is less sensitive to the random choice of a single train–test split. In this study, 10-fold cross-validation is employed to tune the hyperparameter k in the kNN algorithm, ensuring that the optimal k value is robust across multiple partitions of the training data.
-
-### 2.3.2 Distance-Based Classifiers: The k-Nearest Neighbors (kNN) Algorithm
-
-The kNN algorithm is a non-parametric method for classification based on the principle that observations with similar feature values are likely to have similar class labels. Given a new observation, kNN identifies its k nearest neighbors in the training set (typically using Euclidean distance) and assigns the new observation to the majority class among those neighbors (Hastie et al., 2009).
-
-The Euclidean distance between two observations $i$ and $j$ in p-dimensional feature space is defined as:
-$$d_{ij} = \sqrt{\sum_{l=1}^{p} (x_{il} - x_{jl})^2}$$
-
-A critical limitation of this distance metric is that it is scale-dependent: features with large ranges (e.g., distance in meters, ranging from 600 to 42,000) will dominate the calculation, while features with small ranges (e.g., elevation gain as a proportion, ranging from 0 to 1) contribute negligibly. To ensure that all predictors contribute equally to the distance calculation, both must be "centered" (subtract the mean) and "scaled" (divide by the standard deviation):
-$$x'_{il} = \frac{x_{il} - \bar{x}_l}{\sigma_l}$$
-
-Centering and scaling transform each feature to mean 0 and standard deviation 1, so all features operate on the same unit scale. This preprocessing step is mandatory for kNN and any distance-based algorithm; failure to perform it will result in severely biased predictions. Because CART, by contrast, uses univariate binary splits that are invariant to monotone transformations, it does not require feature scaling.
-
-### 2.3.3 Recursive Partitioning: Classification and Regression Trees (CART)
-
-CART constructs a binary decision tree by recursively partitioning the feature space to maximize separation of classes (or minimize variance in regression). At each split, a single feature and a threshold value are chosen to divide the current node into two child nodes. The choice of split is determined by a criterion such as Gini Impurity (for classification) or sum-of-squared residuals (for regression) (Breiman et al., 1984).
-
-For classification, the Gini Impurity of a node is calculated as:
-$$G = 1 - \sum_{i=1}^{C} p_i^2$$
-where $p_i$ is the proportion of observations in the node belonging to class $i$, and $C$ is the total number of classes. Gini ranges from 0 (pure node: all observations belong to one class) to 1−1/C (completely impure node: observations are uniformly distributed across classes). A split that minimizes weighted Gini in the resulting child nodes is preferred. This recursive process continues until a stopping criterion is met (e.g., minimum node size, maximum tree depth), yielding a tree that partitions the feature space into homogeneous regions, each assigned a class label.
-
-A major advantage of CART is interpretability: each path from root to leaf corresponds to an explicit if–then rule. For example: "if distance > 10 km AND elapsed_time < 1 hour, then classify as Run." This transparency is valuable for scientific understanding and is in stark contrast to kNN, which provides predictions without explanatory structure. However, CART is prone to overfitting when trees are grown too deeply, as they may capture noise rather than signal. Pruning techniques are often applied to remove branches that do not improve generalization error.
-
-### 2.3.4 Biomechanical Foundation: Minetti Energy-Cost Model
-
-The Minetti et al. (2002) polynomial model provides a quantitative relationship between terrain gradient and metabolic energy expenditure:
-$$EC = 155.4g^5 - 30.4g^4 - 43.3g^3 + 46.3g^2 + 19.5g + 3.6$$
-
-where EC is the metabolic cost (in ml of O₂ per kg per meter) and g is the grade expressed as a decimal (e.g., 0.05 for a 5% uphill grade). This polynomial captures the non-linear relationship: energy cost increases modestly on shallow grades but accelerates exponentially on steep grades. For downhill running, the model predicts reduced energy cost until approximately −10% to −20% grade, beyond which the cost rises again due to the neuromuscular demands of eccentric loading (braking).
-
-This model justifies treating `total_elevation_gain` as a meaningful predictor with non-linear effects. A simple linear model that assumes constant penalty per meter of climbing would underestimate the impact of steep climbs and overestimate the efficiency of shallow descents. By including elevation gain as a raw predictor (rather than attempting to manually apply the Minetti formula), the kNN and CART algorithms can implicitly learn the non-linear relationship from the data.
-
-### 2.3.5 Ordinary Least Squares (OLS) Regression Assumptions
-
-Multiple linear regression models the conditional expectation of a continuous target Y as a linear combination of predictors:
-$$Y = \beta_0 + \beta_1 X_1 + \cdots + \beta_p X_p + \epsilon$$
-
-where $\epsilon$ is a random error term assumed to follow a normal distribution with mean 0 and constant variance $\sigma^2$. Classical OLS estimation assumes: (1) linearity of the relationship between X and Y, (2) independence of observations, (3) normality of errors, and (4) homoscedasticity (constant variance of errors across X). Violations of these assumptions lead to biased parameter estimates, invalid confidence intervals, and unreliable inference (Fox, 2016).
-
-In this study, multiple linear regression is used as one of the four modeling approaches for predicting average speed on runs only. Residual diagnostics (normality plots, heteroscedasticity plots) are examined to assess whether OLS assumptions are plausibly satisfied. If assumptions are violated, alternative methods (e.g., weighted least squares, robust regression, or the regression tree alternative) may be more appropriate.
-
-## 2.4 Conceptual Framework
-
-The conceptual framework synthesizes the research questions (Chapter 1.2), objectives (Chapter 1.3), and theoretical foundations (Section 2.3) into a unified modeling architecture. The framework posits that a small set of raw GPS-derived variables—distance, moving time, elapsed time, total elevation gain, max speed, and social context (athlete count)—contain sufficient signal to predict both the type of activity performed and the average speed achieved.
-
-Two parallel modeling pathways are proposed: (1) **Classification Path**: kNN and CART algorithms are applied to predict activity type (categorical: Run, Walk, Hike, Workout) from the predictors, addressing Research Question 2. Both algorithms implicitly learn non-linear decision boundaries, with kNN relying on distance-based similarity and CART relying on recursive partitioning. The comparison of kNN vs. CART across the same test set (McNemar's test in Chapter 3.6.2) addresses Research Question 5: which algorithm is more robust? (2) **Regression Path**: Multiple linear regression and a regression tree are applied to predict average speed (numeric, in m/s) for runs only, addressing the secondary predictive objective. Because the regression path focuses on a homogeneous subset (runs) and smaller sample size, both parametric (OLS) and non-parametric (CART) approaches are employed to assess robustness of speed predictions.
-
-Critically, both pathways employ the same six predictors, but preprocessing differs: the kNN pathway requires mandatory feature scaling (centering and scaling) to ensure equal-weight distance calculations (Section 2.3.2), while CART pathways do not. This methodological contrast provides an empirical test of Hypothesis 4 (Chapter 1.4): the necessity of feature scaling in distance-based algorithms.
-
-The framework also acknowledges the biomechanical reality (Section 2.3.4): elevation gain exerts a non-linear metabolic penalty on running performance. By including total_elevation_gain as a raw predictor rather than a manually transformed variable, the algorithms are free to learn the optimal non-linear relationship from the data, which may approximate or diverge from the Minetti polynomial depending on the specificity of the athlete's biomechanics.
-
-```
-[ Independent Variables ]                       [ Dependent Variables ]
-distance, moving_time,           +--- kNN / CART --------> Activity Type (categorical)
-elapsed_time, elevation_gain,    |
-max_speed, athlete_count   ------+
-                                 +--- Lin. Reg. / Reg.Tree --> Average Speed (numeric)
-```
-**Strava and self-tracking studies.** Kuure, Kähkönen, and Hekkala (2026) examined how social features and application design shape long-term engagement on Strava through sixteen semi-structured interviews analysed thematically under the Unified Theory of Acceptance and Use of Technology 2 (UTAUT2) framework. They report that features which enable social comparison and recognition (kudos, comments, peer visibility of mileage) operate as a "social mirror" that simultaneously fuels habitual use and triggers pressure, comparison anxiety, and disengagement among certain users. Their finding that Strava use is sustained jointly by self-tracking utility and social interaction supports treating a personal Strava export not as raw physiological telemetry but as a *behaviourally meaningful* record — the logs themselves reflect the athlete's pacing decisions and self-presentation behaviour. Complementing this, Kolnes and Øvretveit (2026) conducted a mixed-methods study of 225 active club runners that linked endurance self-efficacy and achievement goal orientations to Strava use patterns and watch-estimated maximal oxygen uptake (VO₂max). They found that runners with greater endurance capacity scored higher on self-efficacy and task-approach goals, and that runners who reported having deleted training sessions because of a perceived slow pace scored significantly higher on other-avoidance goals. This directly grounds *pace* as a behaviourally salient axis in the present study: runners themselves segregate runs by speed, sometimes to the point of curating their public record, which makes binary Slow-versus-Fast classification a categorisation runners already perform implicitly.
-
-**Wearable-device and fitness-tracker analytics.** Bullock et al. (2024) ran a prospective cohort of 475 recreational runners over a four-month period, comparing weekly self-reported running distance and pace against data captured by a commercial Garmin watch via Garmin Connect. Intraclass correlation coefficients indicated *good* reliability for distance (median 0.93) and only *moderate* reliability for pace, with no discernible systematic bias. Their result justifies treating Strava-exported `distance` and `moving_time` as trustworthy predictors while reminding the analyst that pace-derived signals carry more measurement noise — a useful caveat when interpreting the CART model's single split on log-transformed moving time. Fuller et al. (2020) provide the broader validity context in a systematic review of 158 publications across nine commercial wearable brands (Apple, Fitbit, Garmin, Samsung, Polar, and others). They report that wrist-worn wearables measured step count accurately in laboratory settings, that heart-rate accuracy varied considerably across brands and conditions, and that no brand was accurate for energy expenditure. This dual finding explains why the present study confines its predictor set to distance, moving time, and elevation gain (the most reliably captured Strava fields) and deliberately excludes heart-rate and calorie estimates that would otherwise tempt inclusion.
+Fuller et al. (2020) provide the broader validity context in a systematic review of 158 publications across nine commercial wearable brands (Apple, Fitbit, Garmin, Samsung, Polar, and others). They report that wrist-worn wearables measured step count accurately in laboratory settings, that heart-rate accuracy varied considerably across brands and conditions, and that no brand was accurate for energy expenditure. This dual finding explains why the present study confines its predictor set to distance, moving time, and elevation gain (the most reliably captured Strava fields) and deliberately excludes heart-rate and calorie estimates that would otherwise tempt inclusion.
 
 Taken together, these four studies justify the dataset, anchor pace as a behaviourally meaningful target, and bound which Strava fields can reasonably be trusted as model inputs. The next section turns from empirical findings to the theoretical lenses these articles bring to the study.
 
@@ -212,11 +119,9 @@ The **Unified Theory of Acceptance and Use of Technology 2 (UTAUT2)** — origin
 
 Finally, the **criterion validity** and **reliability** vocabulary used by Fuller et al. (2020) — distinguishing intradevice and interdevice reliability and testing wearables against laboratory criterion measures — together with the **intraclass correlation coefficient (ICC)** framework Bullock et al. (2024) apply to weekly distance and pace, supplies the methodological language for deciding which Strava fields can be trusted as model inputs. Distance is well validated; pace and energy-related fields are not. The present study's predictor selection — distance, moving time, elevation gain, and rest ratio, with `average_speed` and `max_speed` excluded — is consistent with this evidence base.
 
-*Note: Sections 2.2 and 2.3 currently synthesise only Clusters 1–2 (Strava / self-tracking and wearable-tracker analytics). Cluster 3 (machine-learning activity classification) and Cluster 4 (running biomechanics and the pace–time trade-off) will be incorporated by the remaining co-authors in a later revision.*
-
 ## 2.4 Conceptual Framework
 
-The diagram below shows the modelling pipeline. `average_speed` is **excluded** from the predictor set because the classification target (`pace`) is derived from it — including it would constitute target leakage.
+The diagram below shows the modelling pipeline. Four raw contextual telemetry variables feed a CART classifier whose output is the binary pace tier. `average_speed` and its near-perfect correlate `max_speed` are **excluded** from the predictor set because the classification target (`pace`) is derived from `average_speed` — including either would constitute target leakage.
 
 ![plot of chunk conceptual-framework](figure/conceptual-framework-1.png)
 
@@ -898,29 +803,22 @@ title("Conceptual Framework", cex.main = 1.2)
 # Predictors box
 rect(0.10, 0.72, 0.90, 0.92, col = "#dbeafe", border = "#1d4ed8", lwd = 1.5)
 text(0.50, 0.85,
-     "Predictors (log-transformed, centered/scaled)",
+     "Predictors (raw scale)",
      cex = 0.85, font = 2)
 text(0.50, 0.77,
-     "log_distance   log_moving_time   log_elevation   rest_ratio",
+     "distance   moving_time   total_elevation_gain   rest_ratio",
      cex = 0.75)
 
-# Arrows down to models
-arrows(0.35, 0.72, 0.30, 0.54, lwd = 1.5)
-arrows(0.65, 0.72, 0.70, 0.54, lwd = 1.5)
-
-# kNN box
-rect(0.10, 0.37, 0.48, 0.53, col = "#fef3c7", border = "#d97706", lwd = 1.5)
-text(0.29, 0.47, "kNN", cex = 0.95, font = 2)
-text(0.29, 0.41, "(distance-based)", cex = 0.75)
+# Arrow down to CART
+arrows(0.50, 0.72, 0.50, 0.54, lwd = 1.5)
 
 # CART box
-rect(0.52, 0.37, 0.90, 0.53, col = "#d1fae5", border = "#059669", lwd = 1.5)
-text(0.71, 0.47, "CART", cex = 0.95, font = 2)
-text(0.71, 0.41, "(decision tree)", cex = 0.75)
+rect(0.30, 0.37, 0.70, 0.53, col = "#d1fae5", border = "#059669", lwd = 1.5)
+text(0.50, 0.47, "CART", cex = 0.95, font = 2)
+text(0.50, 0.41, "(decision tree, cp tuned via CV)", cex = 0.75)
 
-# Arrows down to outcome
-arrows(0.29, 0.37, 0.45, 0.20, lwd = 1.5)
-arrows(0.71, 0.37, 0.55, 0.20, lwd = 1.5)
+# Arrow down to outcome
+arrows(0.50, 0.37, 0.50, 0.20, lwd = 1.5)
 
 # Outcome box
 rect(0.25, 0.06, 0.75, 0.19, col = "#f3e8ff", border = "#7c3aed", lwd = 1.5)
