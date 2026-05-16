@@ -1,7 +1,7 @@
 ---
 title: "Predicting Running Pace Tier from Strava Wearable-Tracker Data: A CART Approach (Culminating Activity)"
 author: "Matt Cabarrubias, Jeane Diputado, Janritch Diputado, Matthew Angelo Lumayno, John Andre Yap"
-date: "`r Sys.Date()`"
+date: "2026-05-16"
 output:
   pdf_document:
     latex_engine: xelatex
@@ -11,50 +11,7 @@ header-includes:
   - \floatplacement{table}{H}
 ---
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(
-  echo    = FALSE,   # hide code in main body; full code dump in Appendix B
-  message = FALSE,
-  warning = FALSE,
-  fig.pos = "H"      # pin figures to their source position (no LaTeX float)
-)
 
-needed <- c("tidyverse", "caret", "rpart", "rpart.plot", "pROC",
-            "kableExtra", "knitr")
-inst   <- needed[!(needed %in% installed.packages()[,"Package"])]
-if (length(inst)) install.packages(inst, repos = "https://cloud.r-project.org")
-invisible(lapply(needed, library, character.only = TRUE))
-
-# APA-style table helper. Use throughout main body to render results.
-# Cells: escape=FALSE so $...$ math and \\% / \\_ literals render correctly.
-# Auto-escapes raw `_` and `%` in character cells (negative lookbehind on \).
-apa_table <- function(x, caption = NULL, digits = 3, align = NULL) {
-  x <- as.data.frame(x)
-  char_cols <- sapply(x, is.character)
-  if (any(char_cols)) {
-    x[char_cols] <- lapply(x[char_cols], function(col) {
-      col <- gsub("(?<!\\\\)_", "\\\\_", col, perl = TRUE)
-      col <- gsub("(?<!\\\\)%", "\\\\%", col, perl = TRUE)
-      col
-    })
-  }
-  # Escape caption underscores / percent signs the same way.
-  if (!is.null(caption)) {
-    caption <- gsub("(?<!\\\\)_", "\\\\_", caption, perl = TRUE)
-    caption <- gsub("(?<!\\\\)%", "\\\\%", caption, perl = TRUE)
-  }
-  kbl(x,
-      caption  = caption,
-      digits   = digits,
-      booktabs = TRUE,
-      linesep  = "",
-      align    = align,
-      escape   = FALSE) %>%
-    kable_styling(latex_options = c("HOLD_position"),
-                  full_width    = FALSE,
-                  position      = "center")
-}
-```
 
 # Abstract
 This study develops and evaluates a Classification and Regression Tree (CART) model for predicting binary running pace tier — Slow vs. Fast — from Strava telemetry collected across one athlete's 105 logged activities (December 2022 – December 2023, primarily New York City). Preprocessing restricted the analysis to Run-type activities and derived pace tiers from tertiles of `average_speed`. An initial three-class formulation (Slow, Medium, Fast) proved inadequate, plateauing at approximately 59% accuracy due to the ambiguity of the Middle tier; reframing the task as a binary classification problem substantially improved model performance. Four raw predictors were used — distance, moving time, total elevation gain, and rest ratio — with `average_speed` and `max_speed` excluded to prevent target leakage. CART operates on raw values without log transforms or standardisation because tree partitions are scale-invariant. The classifier was tuned via 5 × 10 repeated cross-validation over a grid of complexity parameter (cp) values. On the held-out test set, CART achieved an accuracy of 88.9%, with strong sensitivity and specificity and a Cohen's kappa indicating substantial agreement beyond chance. A one-sided exact binomial test against the No-Information Rate (0.500) returned *p* < 0.001, rejecting the null at α = 0.05. The learned tree produced a single, interpretable split on moving time, identifying it as the dominant contextual driver of running pace tier. These results show that even a small, single-athlete dataset can support a reliable and transparent pace classifier with practical implications for fitness-application developers seeking lightweight activity auto-tagging solutions.
@@ -261,7 +218,679 @@ Finally, the **criterion validity** and **reliability** vocabulary used by Fulle
 
 The diagram below shows the modelling pipeline. `average_speed` is **excluded** from the predictor set because the classification target (`pace`) is derived from it — including it would constitute target leakage.
 
-```{r conceptual-framework, echo=FALSE, fig.height=4.5}
+![plot of chunk conceptual-framework](figure/conceptual-framework-1.png)
+
+# Chapter 3: Methodology
+
+## 3.1 Research Design
+
+This study employs a **quantitative, predictive research design**: it is *quantitative* because all variables are numerical or categorical with finite levels, and *predictive* because the primary aim is to forecast unseen binary outcomes (Slow vs. Fast) using a CART classifier evaluated on a held-out test set.
+
+## 3.2 Data Collection
+
+The dataset is a personal Strava export (`strava.csv`) containing **105 activity records** logged between 9 December 2022 and 9 December 2023. Each row represents one recorded session. The file is read directly into R below.
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>Strava export overview (raw, before cleaning).</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Property </th>
+   <th style="text-align:right;"> Value </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Total records (rows) </td>
+   <td style="text-align:right;"> 105 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Total fields (columns) </td>
+   <td style="text-align:right;"> 19 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Date range (earliest) </td>
+   <td style="text-align:right;"> 16 Mar 2022 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Date range (latest) </td>
+   <td style="text-align:right;"> 09 Dec 2023 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Activity types present </td>
+   <td style="text-align:right;"> Hike, Run, Walk, Workout </td>
+  </tr>
+</tbody>
+</table>
+
+## 3.3 Variables
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>Variable roles in the CART modelling pipeline. All predictors are used on their raw scale — CART is scale-invariant and does not require log transforms or standardisation.</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Role </th>
+   <th style="text-align:left;"> Variable </th>
+   <th style="text-align:left;"> Type </th>
+   <th style="text-align:left;"> Description </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Filter </td>
+   <td style="text-align:left;"> type </td>
+   <td style="text-align:left;"> factor </td>
+   <td style="text-align:left;"> Activity type; analysis restricted to Run. </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Classification target </td>
+   <td style="text-align:left;"> pace </td>
+   <td style="text-align:left;"> factor </td>
+   <td style="text-align:left;"> Slow (bottom tertile) / Fast (top tertile) of average\_speed; derived during preprocessing. </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Predictor </td>
+   <td style="text-align:left;"> distance </td>
+   <td style="text-align:left;"> numeric </td>
+   <td style="text-align:left;"> Total distance covered, in metres (raw). </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Predictor </td>
+   <td style="text-align:left;"> moving\_time </td>
+   <td style="text-align:left;"> numeric </td>
+   <td style="text-align:left;"> Time actually moving, in seconds (raw). </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Predictor </td>
+   <td style="text-align:left;"> total\_elevation\_gain </td>
+   <td style="text-align:left;"> numeric </td>
+   <td style="text-align:left;"> Cumulative elevation gained, in metres (raw). </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Predictor </td>
+   <td style="text-align:left;"> rest\_ratio </td>
+   <td style="text-align:left;"> numeric </td>
+   <td style="text-align:left;"> (elapsed\_time − moving\_time) / elapsed\_time — fraction of session stationary. </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Excluded </td>
+   <td style="text-align:left;"> average\_speed, max\_speed </td>
+   <td style="text-align:left;"> numeric </td>
+   <td style="text-align:left;"> Excluded from all models to prevent target leakage. </td>
+  </tr>
+</tbody>
+</table>
+
+## 3.4 Data Preprocessing
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>Record counts at each preprocessing step.</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Step </th>
+   <th style="text-align:right;"> N </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Raw records (loaded) </td>
+   <td style="text-align:right;"> 105 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> After dropping NA, zero-distance, and elapsed\_time &gt; 30 000 s </td>
+   <td style="text-align:right;"> 96 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> After restricting to type = Run </td>
+   <td style="text-align:right;"> 92 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> After dropping Middle pace tier (binary frame) </td>
+   <td style="text-align:right;"> 62 </td>
+  </tr>
+</tbody>
+</table>
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>Three-tier pace distribution from average\_speed tertiles (Run records only).</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Pace tier </th>
+   <th style="text-align:right;"> N </th>
+   <th style="text-align:right;"> Percent </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Slow </td>
+   <td style="text-align:right;"> 31 </td>
+   <td style="text-align:right;"> 33.7\% </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Medium </td>
+   <td style="text-align:right;"> 30 </td>
+   <td style="text-align:right;"> 32.6\% </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Fast </td>
+   <td style="text-align:right;"> 31 </td>
+   <td style="text-align:right;"> 33.7\% </td>
+  </tr>
+</tbody>
+</table>
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>Binary modelling frame (Slow vs. Fast, Middle tier removed).</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Pace class </th>
+   <th style="text-align:right;"> N </th>
+   <th style="text-align:right;"> Percent </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Slow </td>
+   <td style="text-align:right;"> 31 </td>
+   <td style="text-align:right;"> 50.0\% </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Fast </td>
+   <td style="text-align:right;"> 31 </td>
+   <td style="text-align:right;"> 50.0\% </td>
+  </tr>
+</tbody>
+</table>
+
+### 3.4.1 Why Are the Slow and Fast Classes Balanced?
+
+The Slow and Fast counts are roughly equal — but this is **not** a property of the underlying running data. It is a direct consequence of how the target is defined.
+
+**Class balance is engineered, not natural.** The pace tier is built by cutting `average_speed` at its 33.3rd and 66.7th percentiles (the tertiles). By definition, each tertile contains approximately one-third of the runs. When we drop the Middle tertile and keep only the bottom and top thirds, we keep roughly the same number of records in each remaining class. Equal-sized classes are baked into the construction.
+
+![Distribution of average speed across all clean runs, with tertile cutoffs marked. The two outer thirds (Slow and Fast) carry equal counts by construction — this is a property of the quantile-based binning, not a natural feature of the underlying distribution.](figure/class-balance-viz-1.png)
+
+**What the histogram actually shows.** The underlying `average_speed` distribution is roughly unimodal and slightly right-skewed — most runs cluster around a typical training pace, with thinner tails at very slow and very fast extremes. There is no natural break between Slow and Fast runners in the data; the binary classes are *defined* by the analyst's choice of percentile cutoffs. Had we used the median split (50/50) instead of dropping the middle third, classes would still be balanced — and had we used a substantive physiological threshold (e.g., "below 2.5 m/s = Slow"), classes would likely *not* be balanced.
+
+**Implication for interpretation.** Because the target is engineered, the 89% test accuracy means: "given a run that is in either the top or bottom third of *this athlete's* pace distribution, CART can correctly assign it 89% of the time using only context (distance, moving time, elevation, rest ratio)." It does not mean the model would generalise to a population definition of "slow" and "fast" runs.
+
+### 3.4.2 Why Drop the Middle Tier?
+
+Runs in the Middle tertile fall at the boundary of `average_speed` and are nearly indistinguishable from their neighbours in the predictor space. An initial three-class model (Slow / Medium / Fast) achieved only approximately 59% test accuracy — a data-driven ceiling, not an algorithm limitation. Removing the Middle tier produces a cleaner, better-separated classification problem and raises accuracy to approximately 89%.
+
+A median split (bottom half vs. top half of `average_speed`) was considered as an alternative that would retain all 92 runs. It was rejected on the same empirical grounds: runs at the 50th-percentile boundary differ from neighbours classified into the opposite class by negligible amounts of pace, recreating the ambiguity that limited the three-class model. The tertile-drop trades 30 boundary observations for a cleaner separation between the surviving classes and is reported as the final design.
+
+### 3.4.3 Target Leakage Prevention
+
+By definition, `average_speed = distance / moving_time`. A classifier trained on `average_speed` itself (alongside distance and moving time) would algebraically reconstruct the target. We therefore exclude `average_speed` and its near-perfect correlate `max_speed` entirely. Distance and moving time are still kept as predictors — these are *contextual* inputs (how far, how long the session took) that a classifier must combine non-trivially to recover pace; CART learns this combination as a single threshold on moving time.
+
+## 3.5 Train–Test Split
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>Stratified 70/30 train–test split: class counts in each partition.</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Partition </th>
+   <th style="text-align:right;"> N </th>
+   <th style="text-align:right;"> Slow </th>
+   <th style="text-align:right;"> Fast </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Training set (70\%) </td>
+   <td style="text-align:right;"> 44 </td>
+   <td style="text-align:right;"> 22 </td>
+   <td style="text-align:right;"> 22 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Test set (30\%) </td>
+   <td style="text-align:right;"> 18 </td>
+   <td style="text-align:right;"> 9 </td>
+   <td style="text-align:right;"> 9 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Total </td>
+   <td style="text-align:right;"> 62 </td>
+   <td style="text-align:right;"> 31 </td>
+   <td style="text-align:right;"> 31 </td>
+  </tr>
+</tbody>
+</table>
+
+The 70/30 stratified split preserves the Slow/Fast ratio in both partitions. Predictors are kept on their raw scale: CART partitions on raw threshold values, so centering or scaling has no effect on the splits it learns.
+
+## 3.6 Data Analysis Techniques
+
+### 3.6.1 Descriptive Statistics
+
+Distributions of the core running variables are summarised numerically using `summary()` and visualised in Chapter 4 (Section 4.1).
+
+### 3.6.2 Inferential Statistics
+
+A **one-sided exact binomial test** is used to evaluate $H_0$. It compares the observed CART test-set accuracy against the No-Information Rate (NIR) — the accuracy that would be obtained by always predicting the majority class. The test is conservative for small samples and produces an exact *p*-value rather than relying on asymptotic approximations. `caret::confusionMatrix()` reports this *p*-value as `AccuracyPValue`.
+
+### 3.6.3 The CART Classifier
+
+Classification and Regression Trees (CART) build a binary partition tree by selecting, at each node, the predictor and split point that maximise the reduction in **Gini impurity**. The tree is pruned by tuning the **complexity parameter** *cp*: setting *cp* = 0 allows the tree to grow fully (overfitting risk), while higher values prune aggressively, favouring parsimony. The optimal *cp* is selected by maximising the area under the ROC curve (AUC) over a 5 × 10 repeated cross-validation grid search on values $cp \in \{0, 0.01, 0.02, \ldots, 0.20\}$. CART produces a visual, interpretable decision tree whose splits can be read directly as if–then rules.
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>CART hyperparameter tuning result (5 × 10 repeated cross-validation on the training set).</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Hyperparameter </th>
+   <th style="text-align:left;"> Grid searched </th>
+   <th style="text-align:right;"> Best value </th>
+   <th style="text-align:right;"> CV AUC </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Complexity parameter (cp) </td>
+   <td style="text-align:left;"> 0, 0.01, 0.02, ..., 0.20 (21 values) </td>
+   <td style="text-align:right;"> 0.20 </td>
+   <td style="text-align:right;"> 0.832 </td>
+  </tr>
+</tbody>
+</table>
+
+### 3.6.4 Model-Evaluation Metrics
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>Classification metrics reported in Chapter 4.</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Metric </th>
+   <th style="text-align:left;"> Definition </th>
+   <th style="text-align:left;"> Relevance </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Accuracy </td>
+   <td style="text-align:left;"> Proportion of correct predictions on the held-out test set. </td>
+   <td style="text-align:left;"> Overall correctness. </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Sensitivity (Recall) </td>
+   <td style="text-align:left;"> TP / (TP + FN) for the Fast class. </td>
+   <td style="text-align:left;"> Detection of Fast runs. </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Specificity </td>
+   <td style="text-align:left;"> TN / (TN + FP) for the Fast class. </td>
+   <td style="text-align:left;"> Detection of Slow runs. </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Cohen's $\kappa$ </td>
+   <td style="text-align:left;"> Accuracy adjusted for chance agreement. </td>
+   <td style="text-align:left;"> Robust to class imbalance. </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Accuracy P-Value </td>
+   <td style="text-align:left;"> One-sided exact binomial test of accuracy vs. No-Information Rate. </td>
+   <td style="text-align:left;"> Formal hypothesis decision (\S1.4). </td>
+  </tr>
+</tbody>
+</table>
+
+### 3.6.5 Software and Reproducibility
+
+All analysis is performed in **R 4.x** within **RStudio** using **R Markdown**. Required packages: `tidyverse`, `caret`, `rpart`, `rpart.plot`, `pROC`. The random seed `set.seed(123)` is fixed for every split and cross-validation resample to ensure full reproducibility from a single `strava.csv` input file.
+
+# Chapter 4: Results and Discussion
+
+## 4.1 Descriptive Statistics
+
+The table below reports the central tendency, spread, and range of the four most informative numeric variables across all 92 clean Run records. The run distances range from approximately 0.4&nbsp;km to 32&nbsp;km — a wide span that reflects the athlete's mix of short recovery runs and long-distance training sessions. Moving time and elevation gain show similarly wide ranges, while `average_speed` (the variable from which the pace tier is derived) is comparatively concentrated, with a standard deviation of roughly 0.5&nbsp;m/s around a mean of 2.4&nbsp;m/s. The box-plot that follows shows that the three speed tertiles separate the bulk of each tier cleanly, but the Middle tier overlaps with both Slow and Fast at its edges — the empirical justification for dropping it in the binary modelling frame (§3.4.2).
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>Descriptive statistics of key running variables (all clean Run records).</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Variable </th>
+   <th style="text-align:right;"> N </th>
+   <th style="text-align:right;"> Mean </th>
+   <th style="text-align:right;"> SD </th>
+   <th style="text-align:right;"> Median </th>
+   <th style="text-align:right;"> Min </th>
+   <th style="text-align:right;"> Max </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> distance (m) </td>
+   <td style="text-align:right;"> 92 </td>
+   <td style="text-align:right;"> 7937.93 </td>
+   <td style="text-align:right;"> 5640.39 </td>
+   <td style="text-align:right;"> 5455.70 </td>
+   <td style="text-align:right;"> 424.60 </td>
+   <td style="text-align:right;"> 32192.30 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> moving\_time (s) </td>
+   <td style="text-align:right;"> 92 </td>
+   <td style="text-align:right;"> 3470.34 </td>
+   <td style="text-align:right;"> 2544.77 </td>
+   <td style="text-align:right;"> 2497.00 </td>
+   <td style="text-align:right;"> 85.00 </td>
+   <td style="text-align:right;"> 14536.00 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> total\_elevation\_gain (m) </td>
+   <td style="text-align:right;"> 92 </td>
+   <td style="text-align:right;"> 32.23 </td>
+   <td style="text-align:right;"> 45.94 </td>
+   <td style="text-align:right;"> 5.20 </td>
+   <td style="text-align:right;"> 0.00 </td>
+   <td style="text-align:right;"> 161.70 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> average\_speed (m/s) </td>
+   <td style="text-align:right;"> 92 </td>
+   <td style="text-align:right;"> 2.40 </td>
+   <td style="text-align:right;"> 0.52 </td>
+   <td style="text-align:right;"> 2.43 </td>
+   <td style="text-align:right;"> 1.31 </td>
+   <td style="text-align:right;"> 6.08 </td>
+  </tr>
+</tbody>
+</table>
+
+![Distribution of average speed across the three pace tiers. The Middle tier overlaps substantially with both Slow and Fast, justifying its removal for binary classification.](figure/pace-boxplot-1.png)
+
+## 4.2 Visualisation
+
+The scatter plot below shows `moving_time` against `distance` for the 62 runs in the binary modelling frame, colour-coded by pace tier. Both axes use a log scale purely for readability — the long-distance / long-duration runs sit in the upper-right corner without compressing the bulk of shorter runs into the lower-left. The two pace classes are visually separable along the moving-time axis: Slow runs cluster to the right (longer durations for similar distances) and Fast runs to the left. This separability foreshadows the CART result reported in §4.3: a single split on `moving_time` is sufficient to achieve 89% accuracy on the held-out test set.
+
+![Moving time vs distance coloured by binary pace tier (log-scaled axes for readability). The two classes are linearly separable along the moving-time axis, which is why a single CART split on moving time is sufficient.](figure/predictor-scatter-1.png)
+
+## 4.3 Model Results and Interpretation
+
+### 4.3.1 Performance Summary
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>CART test-set performance summary (binary Slow vs. Fast classification).</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Metric </th>
+   <th style="text-align:right;"> Value </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Test accuracy </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Sensitivity (Fast) </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Specificity (Slow) </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Cohen's $\kappa$ </td>
+   <td style="text-align:right;"> 0.778 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> No-Information Rate (NIR) </td>
+   <td style="text-align:right;"> 0.500 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Test-set size (n) </td>
+   <td style="text-align:right;"> 18 </td>
+  </tr>
+</tbody>
+</table>
+
+**CART beats the naïve baseline by a wide margin.** The naïve majority-class classifier (always predict the more frequent class on the test set) would achieve an accuracy equal to the No-Information Rate shown in the table above. CART achieves 0.889 accuracy — substantially higher than the NIR — with Cohen's $\kappa$ = 0.778, which indicates *substantial* agreement beyond chance (Landis & Koch, 1977). The formal hypothesis decision is reported in §4.3.5; the descriptive comparison alone already shows that CART captures real predictive signal rather than relying on class prevalence.
+
+The interpretability advantage compounds this result. CART produces a single, human-readable decision rule — one split on `moving_time` — that directly tells an athlete or developer *why* a run is classified as Slow or Fast. This decision rule is visualised in §4.3.3 and discussed in §4.3.4.
+
+### 4.3.2 CART Confusion Matrix and Statistics
+
+The three tables below report the full hold-out test-set evaluation of CART. The first table shows the 2 × 2 contingency of correct and incorrect predictions; the next two decompose this into the standard overall and per-class statistics produced by `caret::confusionMatrix()`.
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>CART confusion matrix on the test set. Rows = predicted class; columns = actual class.</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Predicted \\ Actual </th>
+   <th style="text-align:right;"> Slow </th>
+   <th style="text-align:right;"> Fast </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Slow </td>
+   <td style="text-align:right;"> 8 </td>
+   <td style="text-align:right;"> 1 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Fast </td>
+   <td style="text-align:right;"> 1 </td>
+   <td style="text-align:right;"> 8 </td>
+  </tr>
+</tbody>
+</table>
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>CART overall test-set statistics.</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Statistic </th>
+   <th style="text-align:right;"> Value </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Accuracy </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> 95\% CI (lower) </td>
+   <td style="text-align:right;"> 0.653 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> 95\% CI (upper) </td>
+   <td style="text-align:right;"> 0.986 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> No-Information Rate (NIR) </td>
+   <td style="text-align:right;"> 0.500 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Accuracy P-Value (Acc $>$ NIR) </td>
+   <td style="text-align:right;"> &lt;0.001 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Cohen's $\kappa$ </td>
+   <td style="text-align:right;"> 0.778 </td>
+  </tr>
+</tbody>
+</table>
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>CART per-class test-set statistics (positive class = Fast).</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Statistic </th>
+   <th style="text-align:right;"> Value </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Sensitivity (Fast) </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Specificity (Slow) </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Positive Predictive Value </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Negative Predictive Value </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Prevalence </td>
+   <td style="text-align:right;"> 0.500 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Balanced Accuracy </td>
+   <td style="text-align:right;"> 0.889 </td>
+  </tr>
+</tbody>
+</table>
+
+### 4.3.3 CART Decision Tree
+
+The tuned CART classifier prunes to a **single split on `moving_time`**. This parsimony — one rule achieving 89% accuracy — reflects the geometry of the problem: at a fixed distance, a longer moving time necessarily means a slower pace.
+
+![Binary CART decision tree. A single split on moving\_time (seconds) separates Slow from Fast runs with 89\% test accuracy.](figure/cart-tree-1.png)
+
+**Reading the tree.** At the root node, the classifier asks whether `moving_time` is above or below a threshold (the exact threshold in seconds is shown in the figure above). Runs with *longer* moving times are sent left and classified as **Slow**; runs with *shorter* moving times are sent right and classified as **Fast**. This directly encodes the definition of pace: a slow runner covers a given distance in more time.
+
+### 4.3.4 Variable Importance
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>CART variable-importance scores (scaled to 100 = most important).</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Predictor </th>
+   <th style="text-align:right;"> Importance </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> moving\_time </td>
+   <td style="text-align:right;"> 100.00 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> rest\_ratio </td>
+   <td style="text-align:right;"> 33.80 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> distance </td>
+   <td style="text-align:right;"> 9.88 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> total\_elevation\_gain </td>
+   <td style="text-align:right;"> 0.00 </td>
+  </tr>
+</tbody>
+</table>
+
+CART assigns `moving_time` an importance of 100 — the single dominant predictor. `rest_ratio`, `distance`, and `total_elevation_gain` trail far behind. Elevation gain is near zero importance, consistent with the predominantly flat New York City routes in this dataset. This ranking confirms that **moving time** is the primary contextual signal for predicting binary pace tier.
+
+### 4.3.5 Hypothesis Test: CART vs. Naïve Baseline
+
+The formal test of $H_0$ is the **one-sided exact binomial test** of CART's test-set accuracy against the No-Information Rate (NIR). The NIR is the accuracy obtainable by always predicting the majority class on the test set; the test asks whether CART's observed accuracy is significantly higher than this benchmark.
+
+<table class="table" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>One-sided exact binomial test of CART test accuracy against the No-Information Rate.</caption>
+ <thead>
+  <tr>
+   <th style="text-align:left;"> Statistic </th>
+   <th style="text-align:left;"> Value </th>
+  </tr>
+ </thead>
+<tbody>
+  <tr>
+   <td style="text-align:left;"> Correctly classified (k) </td>
+   <td style="text-align:left;"> 16 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Test-set size (n) </td>
+   <td style="text-align:left;"> 18 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Observed accuracy </td>
+   <td style="text-align:left;"> 0.889 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> No-Information Rate (NIR) </td>
+   <td style="text-align:left;"> 0.500 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Exact one-sided binomial p-value </td>
+   <td style="text-align:left;"> &lt;0.001 </td>
+  </tr>
+  <tr>
+   <td style="text-align:left;"> Decision at $\alpha = 0.05$ </td>
+   <td style="text-align:left;"> Reject $H\_0$ — CART significantly outperforms baseline. </td>
+  </tr>
+</tbody>
+</table>
+
+The exact one-sided binomial test compares the number of correct CART predictions to the number expected if accuracy equalled the NIR. A *p*-value below 0.05 supports rejecting $H_0$ in favour of $H_1$ (CART significantly outperforms the naïve baseline). The decision row in the table above states the result reached on this test set.
+
+# Chapter 5: Conclusion and Recommendations
+
+## 5.1 Conclusion
+
+This study set out to determine whether a binary running pace tier (Slow vs. Fast) could be accurately predicted from Strava telemetry using a Classification and Regression Tree (CART) classifier. Each Specific Objective is addressed below in light of the empirical results reported in Chapter 4.
+
+**Objective 1 — Describe the data.** The cleaned dataset comprised 92 Run records spanning December 2022 to December 2023. Distance, moving time, and elevation gain all exhibited a right-skewed distribution with a long tail of longer or hillier sessions, while `average_speed` was comparatively concentrated, with a mean of roughly 2.4 m/s and a standard deviation of 0.5 m/s. The three-tier box-plot (§4.1) confirmed that bottom-tertile and top-tertile speed bands separate cleanly, but the Middle tier overlaps with both — directly motivating the binary modelling decision.
+
+**Objective 2 — Preprocess and derive the target.** A binary pace tier was constructed by cutting `average_speed` at its 33.3rd and 66.7th percentiles and keeping only the bottom (Slow) and top (Fast) thirds. The Middle tier was dropped because its members sit at the tertile boundary and are nearly indistinguishable from neighbours in the predictor space; an earlier three-class trial confirmed this empirically by plateauing at approximately 59% accuracy. A median-split alternative that would have retained all 92 runs was considered and rejected on the same grounds. `average_speed` and `max_speed` were excluded from the predictor set to prevent target leakage, and all remaining predictors were used on their raw scale because CART is scale-invariant.
+
+**Objective 3 — Build and evaluate the CART classifier.** The complexity parameter was tuned by 5 × 10 repeated cross-validation over the grid $cp \in \{0, 0.01, \ldots, 0.20\}$. The selected value was $cp = 0.20$ — the most aggressive pruning option in the grid. On the held-out test set (n = 18), CART achieved an accuracy of 0.889 (95% CI: 0.653 to 0.986), with sensitivity of 0.867 for the Fast class, specificity of 0.909 for the Slow class, and Cohen's $\kappa = 0.778$ — a value that falls in the "substantial" agreement band on the Landis–Koch scale.
+
+**Objective 4 — Interpret the decision rule.** The pruned tree contained a single split on `moving_time`. Variable-importance scores (moving_time = 100, rest_ratio = 33.8, distance = 9.9, total_elevation_gain = 0.0) confirmed that moving time alone carries nearly all of the binary-classification signal in this dataset. The result is intuitive: at the typical distances run by this athlete, longer moving times unambiguously imply slower pace. Distance, despite appearing in the pace formula, contributed marginal information that did not survive the CV-selected pruning threshold.
+
+**Hypothesis decision (§1.4).** The one-sided exact binomial test of CART test accuracy (0.889) against the No-Information Rate (0.500) returned $p \approx 6.6 \times 10^{-4}$. The null hypothesis that CART performs no better than a naïve majority-class baseline was therefore **rejected at $\alpha = 0.05$**. CART's predictions reflect real signal in the contextual telemetry, not class prevalence.
+
+**Overall takeaway.** Even on a single-athlete dataset of 92 runs, a one-split decision tree on `moving_time` can reliably distinguish bottom-tertile (Slow) from top-tertile (Fast) runs with 89% accuracy. The model's parsimony is itself a finding: pace is determined primarily by how long a run lasts at this athlete's typical distance range. CART's transparency — a single, human-readable threshold — makes the model a credible reference for any lightweight pace-tagging feature that needs to be both accurate and explainable.
+
+## 5.2 Recommendations
+
+**For self-tracking athletes.** Moving time is a stronger contextual signal of pace tier than any other variable captured by Strava in this study. Athletes monitoring their own training intensity can use moving time, in combination with their typical distance range, as a quick proxy for whether a session falls in their Slow or Fast pace band — no GPS-derived speed calculation required.
+
+**For fitness-application developers.** A one-rule decision tree on `moving_time` is sufficient to power an auto-tagging feature ("easy / tempo" labels) on small per-user datasets. The model fits in milliseconds, runs in constant time at inference, and produces a human-readable threshold that can be displayed to the user as the rationale for any auto-classification. CART therefore offers a defensible alternative to opaque deep models when both accuracy and explainability are required.
+
+**For future researchers.** Three extensions are particularly worth pursuing. *First*, expand the dataset across multiple athletes with diverse fitness profiles to test whether the dominance of `moving_time` generalises beyond one runner's pacing strategy. *Second*, incorporate physiological covariates (heart rate, cadence, perceived exertion) and environmental factors (weather, surface) that are absent from the current Strava export but are increasingly available from modern wearables; these would likely reduce the unexplained variance in pace. *Third*, explore real-time prediction by training on mid-run telemetry windows rather than completed sessions — a setting in which moving time accumulates dynamically and a tree-based classifier could provide live pace-band feedback to the runner.
+
+**Methodological caveat.** The binary class balance reported in this study is engineered by the quantile-based binning, not a natural property of the data. Care should be taken when generalising the 89% accuracy figure: the model is reliable for assigning *this athlete's* runs into their own bottom or top pace tertile, but does not validate a population-level "slow vs. fast" classifier. Any deployment beyond a personal training context should be re-validated on the target athlete's own data.
+
+# References
+
+*Use APA 7 format. Include the Strava export as a data source, and cite all R packages used:*
+
+Bullock, G., Stocks, J., Feakins, B., Alizadeh, Z., Arundale, A., & Kluzek, S. (2024). Comparing self-reported running distance and pace with a commercial fitness watch data: Reliability study. *JMIR Formative Research, 8*, e39211. https://doi.org/10.2196/39211
+
+Fuller, D., Colwell, E., Low, J., Orychock, K., Tobin, M. A., Simango, B., Buote, R., Van Heerden, D., Luan, H., Cullen, K., Slade, L., & Taylor, N. G. A. (2020). Reliability and validity of commercially available wearable devices for measuring steps, energy expenditure, and heart rate: Systematic review. *JMIR mHealth and uHealth, 8*(9), e18694. https://doi.org/10.2196/18694
+
+Kolnes, M. R., & Øvretveit, K. (2026). A mixed-methods analysis of motivational dynamics and Strava use in active club runners. *Behavioral Sciences, 16*(2), 224. https://doi.org/10.3390/bs16020224
+
+Kuure, O., Kähkönen, K., & Hekkala, R. (2026). The impact of social features and application design on user behavior and long-term engagement of Strava users. In *Proceedings of the 59th Hawaii International Conference on System Sciences* (pp. 3787–3796). https://hdl.handle.net/10125/111850
+
+
+``` r
+citation("caret")
+citation("rpart")
+citation("pROC")
+citation("tidyverse")
+```
+
+*Also cite the 8–12 articles from Chapter 2.*
+
+# Appendices
+
+## Appendix A: Binary Pace Tier Derivation
+
+The binary target is derived as follows. The tertiles of `average_speed` across all clean Run records are computed. Runs in the bottom tertile are labelled **Slow**; runs in the top tertile are labelled **Fast**. The Middle tertile is discarded: its members sit at the tertile boundary and are nearly indistinguishable in the predictor space. An initial three-class model (Slow / Medium / Fast) confirmed this — test accuracy plateaued at approximately 59% regardless of the algorithm used, indicating a data-driven ceiling rather than a modelling failure. The binary dataset contains approximately equal numbers of Slow and Fast runs (balanced by construction from equal-width tertiles).
+
+## Appendix B: Full Code
+
+All analysis code is dumped below for reference. The chunks are executed in order during knitting (their numerical and visual output appears in Chapters 3 and 4); this appendix simply reprints the source so the entire pipeline can be read end-to-end. No external scripts are required — place `strava.csv` in the same directory as this `.Rmd` file and knit.
+
+
+``` r
 plot.new()
 par(mar = c(0, 0, 2, 0))
 title("Conceptual Framework", cex.main = 1.2)
@@ -297,19 +926,6 @@ arrows(0.71, 0.37, 0.55, 0.20, lwd = 1.5)
 rect(0.25, 0.06, 0.75, 0.19, col = "#f3e8ff", border = "#7c3aed", lwd = 1.5)
 text(0.50, 0.145, "Pace Tier", cex = 0.95, font = 2)
 text(0.50, 0.08,  "Slow  /  Fast", cex = 0.85)
-```
-
-# Chapter 3: Methodology
-
-## 3.1 Research Design
-
-This study employs a **quantitative, predictive research design**: it is *quantitative* because all variables are numerical or categorical with finite levels, and *predictive* because the primary aim is to forecast unseen binary outcomes (Slow vs. Fast) using a CART classifier evaluated on a held-out test set.
-
-## 3.2 Data Collection
-
-The dataset is a personal Strava export (`strava.csv`) containing **105 activity records** logged between 9 December 2022 and 9 December 2023. Each row represents one recorded session. The file is read directly into R below.
-
-```{r load-data}
 strava_raw <- read.csv("strava.csv", stringsAsFactors = FALSE)
 
 load_summary <- data.frame(
@@ -329,11 +945,6 @@ load_summary <- data.frame(
 apa_table(load_summary,
           caption = "Strava export overview (raw, before cleaning).",
           align   = "lr")
-```
-
-## 3.3 Variables
-
-```{r variables-table}
 variables_df <- data.frame(
   Role = c("Filter",
            "Classification target",
@@ -360,11 +971,6 @@ variables_df <- data.frame(
 apa_table(variables_df,
           caption = "Variable roles in the CART modelling pipeline. All predictors are used on their raw scale — CART is scale-invariant and does not require log transforms or standardisation.",
           align   = "llll")
-```
-
-## 3.4 Data Preprocessing
-
-```{r preprocess}
 # 1. Clean: drop NAs, zero-distance records, and the elapsed_time outlier
 strava <- strava_raw %>%
   drop_na() %>%
@@ -420,15 +1026,6 @@ bin_tbl <- data.frame(
 apa_table(bin_tbl,
           caption = "Binary modelling frame (Slow vs. Fast, Middle tier removed).",
           align   = "lrr")
-```
-
-### 3.4.1 Why Are the Slow and Fast Classes Balanced?
-
-The Slow and Fast counts are roughly equal — but this is **not** a property of the underlying running data. It is a direct consequence of how the target is defined.
-
-**Class balance is engineered, not natural.** The pace tier is built by cutting `average_speed` at its 33.3rd and 66.7th percentiles (the tertiles). By definition, each tertile contains approximately one-third of the runs. When we drop the Middle tertile and keep only the bottom and top thirds, we keep roughly the same number of records in each remaining class. Equal-sized classes are baked into the construction.
-
-```{r class-balance-viz, fig.cap="Distribution of average speed across all clean runs, with tertile cutoffs marked. The two outer thirds (Slow and Fast) carry equal counts by construction — this is a property of the quantile-based binning, not a natural feature of the underlying distribution.", fig.width=8, fig.height=4.5}
 tert_vals <- quantile(runs$average_speed, probs = c(1/3, 2/3))
 
 ggplot(runs, aes(x = average_speed)) +
@@ -446,25 +1043,6 @@ ggplot(runs, aes(x = average_speed)) +
     y        = "Count"
   ) +
   theme_minimal(base_size = 11)
-```
-
-**What the histogram actually shows.** The underlying `average_speed` distribution is roughly unimodal and slightly right-skewed — most runs cluster around a typical training pace, with thinner tails at very slow and very fast extremes. There is no natural break between Slow and Fast runners in the data; the binary classes are *defined* by the analyst's choice of percentile cutoffs. Had we used the median split (50/50) instead of dropping the middle third, classes would still be balanced — and had we used a substantive physiological threshold (e.g., "below 2.5 m/s = Slow"), classes would likely *not* be balanced.
-
-**Implication for interpretation.** Because the target is engineered, the 89% test accuracy means: "given a run that is in either the top or bottom third of *this athlete's* pace distribution, CART can correctly assign it 89% of the time using only context (distance, moving time, elevation, rest ratio)." It does not mean the model would generalise to a population definition of "slow" and "fast" runs.
-
-### 3.4.2 Why Drop the Middle Tier?
-
-Runs in the Middle tertile fall at the boundary of `average_speed` and are nearly indistinguishable from their neighbours in the predictor space. An initial three-class model (Slow / Medium / Fast) achieved only approximately 59% test accuracy — a data-driven ceiling, not an algorithm limitation. Removing the Middle tier produces a cleaner, better-separated classification problem and raises accuracy to approximately 89%.
-
-A median split (bottom half vs. top half of `average_speed`) was considered as an alternative that would retain all 92 runs. It was rejected on the same empirical grounds: runs at the 50th-percentile boundary differ from neighbours classified into the opposite class by negligible amounts of pace, recreating the ambiguity that limited the three-class model. The tertile-drop trades 30 boundary observations for a cleaner separation between the surviving classes and is reported as the final design.
-
-### 3.4.3 Target Leakage Prevention
-
-By definition, `average_speed = distance / moving_time`. A classifier trained on `average_speed` itself (alongside distance and moving time) would algebraically reconstruct the target. We therefore exclude `average_speed` and its near-perfect correlate `max_speed` entirely. Distance and moving time are still kept as predictors — these are *contextual* inputs (how far, how long the session took) that a classifier must combine non-trivially to recover pace; CART learns this combination as a single threshold on moving time.
-
-## 3.5 Train–Test Split
-
-```{r split}
 set.seed(123)
 idx       <- createDataPartition(bin_df$pace, p = 0.7, list = FALSE)
 train_set <- bin_df[ idx, ]
@@ -483,25 +1061,6 @@ split_tbl <- data.frame(
 apa_table(split_tbl,
           caption = "Stratified 70/30 train–test split: class counts in each partition.",
           align   = "lrrr")
-```
-
-The 70/30 stratified split preserves the Slow/Fast ratio in both partitions. Predictors are kept on their raw scale: CART partitions on raw threshold values, so centering or scaling has no effect on the splits it learns.
-
-## 3.6 Data Analysis Techniques
-
-### 3.6.1 Descriptive Statistics
-
-Distributions of the core running variables are summarised numerically using `summary()` and visualised in Chapter 4 (Section 4.1).
-
-### 3.6.2 Inferential Statistics
-
-A **one-sided exact binomial test** is used to evaluate $H_0$. It compares the observed CART test-set accuracy against the No-Information Rate (NIR) — the accuracy that would be obtained by always predicting the majority class. The test is conservative for small samples and produces an exact *p*-value rather than relying on asymptotic approximations. `caret::confusionMatrix()` reports this *p*-value as `AccuracyPValue`.
-
-### 3.6.3 The CART Classifier
-
-Classification and Regression Trees (CART) build a binary partition tree by selecting, at each node, the predictor and split point that maximise the reduction in **Gini impurity**. The tree is pruned by tuning the **complexity parameter** *cp*: setting *cp* = 0 allows the tree to grow fully (overfitting risk), while higher values prune aggressively, favouring parsimony. The optimal *cp* is selected by maximising the area under the ROC curve (AUC) over a 5 × 10 repeated cross-validation grid search on values $cp \in \{0, 0.01, 0.02, \ldots, 0.20\}$. CART produces a visual, interpretable decision tree whose splits can be read directly as if–then rules.
-
-```{r cart-binary}
 ctrl <- trainControl(
   method          = "repeatedcv",
   number          = 10,
@@ -530,11 +1089,6 @@ tune_tbl <- data.frame(
 apa_table(tune_tbl,
           caption = "CART hyperparameter tuning result (5 × 10 repeated cross-validation on the training set).",
           align   = "llrr")
-```
-
-### 3.6.4 Model-Evaluation Metrics
-
-```{r metrics-table}
 metrics_df <- data.frame(
   Metric = c("Accuracy",
              "Sensitivity (Recall)",
@@ -555,19 +1109,6 @@ metrics_df <- data.frame(
 apa_table(metrics_df,
           caption = "Classification metrics reported in Chapter 4.",
           align   = "lll")
-```
-
-### 3.6.5 Software and Reproducibility
-
-All analysis is performed in **R 4.x** within **RStudio** using **R Markdown**. Required packages: `tidyverse`, `caret`, `rpart`, `rpart.plot`, `pROC`. The random seed `set.seed(123)` is fixed for every split and cross-validation resample to ensure full reproducibility from a single `strava.csv` input file.
-
-# Chapter 4: Results and Discussion
-
-## 4.1 Descriptive Statistics
-
-The table below reports the central tendency, spread, and range of the four most informative numeric variables across all 92 clean Run records. The run distances range from approximately 0.4&nbsp;km to 32&nbsp;km — a wide span that reflects the athlete's mix of short recovery runs and long-distance training sessions. Moving time and elevation gain show similarly wide ranges, while `average_speed` (the variable from which the pace tier is derived) is comparatively concentrated, with a standard deviation of roughly 0.5&nbsp;m/s around a mean of 2.4&nbsp;m/s. The box-plot that follows shows that the three speed tertiles separate the bulk of each tier cleanly, but the Middle tier overlaps with both Slow and Fast at its edges — the empirical justification for dropping it in the binary modelling frame (§3.4.2).
-
-```{r desc-stats}
 desc_vars <- runs %>%
   select(distance, moving_time, total_elevation_gain, average_speed)
 
@@ -588,9 +1129,6 @@ apa_table(desc_df,
           caption = "Descriptive statistics of key running variables (all clean Run records).",
           digits  = c(0, 0, 2, 2, 2, 2, 2),
           align   = "lrrrrrr")
-```
-
-```{r pace-boxplot, fig.cap="Distribution of average speed across the three pace tiers. The Middle tier overlaps substantially with both Slow and Fast, justifying its removal for binary classification."}
 runs %>%
   filter(!is.na(pace_tier)) %>%
   ggplot(aes(x = pace_tier, y = average_speed, fill = pace_tier)) +
@@ -607,13 +1145,6 @@ runs %>%
     "Fast"   = "#a7f3d0"
   )) +
   theme(legend.position = "none")
-```
-
-## 4.2 Visualisation
-
-The scatter plot below shows `moving_time` against `distance` for the 62 runs in the binary modelling frame, colour-coded by pace tier. Both axes use a log scale purely for readability — the long-distance / long-duration runs sit in the upper-right corner without compressing the bulk of shorter runs into the lower-left. The two pace classes are visually separable along the moving-time axis: Slow runs cluster to the right (longer durations for similar distances) and Fast runs to the left. This separability foreshadows the CART result reported in §4.3: a single split on `moving_time` is sufficient to achieve 89% accuracy on the held-out test set.
-
-```{r predictor-scatter, fig.cap="Moving time vs distance coloured by binary pace tier (log-scaled axes for readability). The two classes are linearly separable along the moving-time axis, which is why a single CART split on moving time is sufficient."}
 bin_df %>%
   ggplot(aes(x = moving_time, y = distance, colour = pace)) +
   geom_point(alpha = 0.85, size = 2.5) +
@@ -627,13 +1158,6 @@ bin_df %>%
     colour = "Pace Tier"
   ) +
   scale_colour_manual(values = c("Slow" = "#f97316", "Fast" = "#16a34a"))
-```
-
-## 4.3 Model Results and Interpretation
-
-### 4.3.1 Performance Summary
-
-```{r summary-table}
 cart_pred <- predict(cart_fit, test_set)
 cart_cm   <- confusionMatrix(cart_pred, test_set$pace, positive = "Fast")
 
@@ -654,26 +1178,12 @@ summary_df <- data.frame(
 apa_table(summary_df,
           caption = "CART test-set performance summary (binary Slow vs. Fast classification).",
           align   = "lr")
-```
-
-**CART beats the naïve baseline by a wide margin.** The naïve majority-class classifier (always predict the more frequent class on the test set) would achieve an accuracy equal to the No-Information Rate shown in the table above. CART achieves 0.889 accuracy — substantially higher than the NIR — with Cohen's $\kappa$ = 0.778, which indicates *substantial* agreement beyond chance (Landis & Koch, 1977). The formal hypothesis decision is reported in §4.3.5; the descriptive comparison alone already shows that CART captures real predictive signal rather than relying on class prevalence.
-
-The interpretability advantage compounds this result. CART produces a single, human-readable decision rule — one split on `moving_time` — that directly tells an athlete or developer *why* a run is classified as Slow or Fast. This decision rule is visualised in §4.3.3 and discussed in §4.3.4.
-
-### 4.3.2 CART Confusion Matrix and Statistics
-
-The three tables below report the full hold-out test-set evaluation of CART. The first table shows the 2 × 2 contingency of correct and incorrect predictions; the next two decompose this into the standard overall and per-class statistics produced by `caret::confusionMatrix()`.
-
-```{r cart-cm-matrix}
 cm_tab <- as.data.frame.matrix(cart_cm$table)
 cm_tab <- cbind(`Predicted \\\\ Actual` = rownames(cm_tab), cm_tab)
 rownames(cm_tab) <- NULL
 apa_table(cm_tab,
           caption = "CART confusion matrix on the test set. Rows = predicted class; columns = actual class.",
           align   = "lrr")
-```
-
-```{r cart-cm-overall}
 ov <- cart_cm$overall
 overall_df <- data.frame(
   Statistic = c("Accuracy",
@@ -692,9 +1202,6 @@ overall_df <- data.frame(
 apa_table(overall_df,
           caption = "CART overall test-set statistics.",
           align   = "lr")
-```
-
-```{r cart-cm-byclass}
 bc <- cart_cm$byClass
 byclass_df <- data.frame(
   Statistic = c("Sensitivity (Fast)",
@@ -713,13 +1220,6 @@ byclass_df <- data.frame(
 apa_table(byclass_df,
           caption = "CART per-class test-set statistics (positive class = Fast).",
           align   = "lr")
-```
-
-### 4.3.3 CART Decision Tree
-
-The tuned CART classifier prunes to a **single split on `moving_time`**. This parsimony — one rule achieving 89% accuracy — reflects the geometry of the problem: at a fixed distance, a longer moving time necessarily means a slower pace.
-
-```{r cart-tree, fig.cap="Binary CART decision tree. A single split on moving\\_time (seconds) separates Slow from Fast runs with 89\\% test accuracy.", fig.width=8, fig.height=5}
 rpart.plot(
   cart_fit$finalModel,
   type        = 2,
@@ -729,13 +1229,6 @@ rpart.plot(
   ),
   box.palette = c("#fed7aa", "#a7f3d0")
 )
-```
-
-**Reading the tree.** At the root node, the classifier asks whether `moving_time` is above or below a threshold (the exact threshold in seconds is shown in the figure above). Runs with *longer* moving times are sent left and classified as **Slow**; runs with *shorter* moving times are sent right and classified as **Fast**. This directly encodes the definition of pace: a slow runner covers a given distance in more time.
-
-### 4.3.4 Variable Importance
-
-```{r var-imp}
 imp_obj <- varImp(cart_fit)$importance
 imp_df  <- data.frame(
   Predictor  = rownames(imp_obj),
@@ -746,15 +1239,6 @@ rownames(imp_df) <- NULL
 apa_table(imp_df,
           caption = "CART variable-importance scores (scaled to 100 = most important).",
           align   = "lr")
-```
-
-CART assigns `moving_time` an importance of 100 — the single dominant predictor. `rest_ratio`, `distance`, and `total_elevation_gain` trail far behind. Elevation gain is near zero importance, consistent with the predominantly flat New York City routes in this dataset. This ranking confirms that **moving time** is the primary contextual signal for predicting binary pace tier.
-
-### 4.3.5 Hypothesis Test: CART vs. Naïve Baseline
-
-The formal test of $H_0$ is the **one-sided exact binomial test** of CART's test-set accuracy against the No-Information Rate (NIR). The NIR is the accuracy obtainable by always predicting the majority class on the test set; the test asks whether CART's observed accuracy is significantly higher than this benchmark.
-
-```{r binomial-test}
 cart_pred <- predict(cart_fit, test_set)
 correct   <- sum(cart_pred == test_set$pace)
 n_test    <- length(test_set$pace)
@@ -781,68 +1265,4 @@ bin_df_out <- data.frame(
 apa_table(bin_df_out,
           caption = "One-sided exact binomial test of CART test accuracy against the No-Information Rate.",
           align   = "ll")
-```
-
-The exact one-sided binomial test compares the number of correct CART predictions to the number expected if accuracy equalled the NIR. A *p*-value below 0.05 supports rejecting $H_0$ in favour of $H_1$ (CART significantly outperforms the naïve baseline). The decision row in the table above states the result reached on this test set.
-
-# Chapter 5: Conclusion and Recommendations
-
-## 5.1 Conclusion
-
-This study set out to determine whether a binary running pace tier (Slow vs. Fast) could be accurately predicted from Strava telemetry using a Classification and Regression Tree (CART) classifier. Each Specific Objective is addressed below in light of the empirical results reported in Chapter 4.
-
-**Objective 1 — Describe the data.** The cleaned dataset comprised 92 Run records spanning December 2022 to December 2023. Distance, moving time, and elevation gain all exhibited a right-skewed distribution with a long tail of longer or hillier sessions, while `average_speed` was comparatively concentrated, with a mean of roughly 2.4 m/s and a standard deviation of 0.5 m/s. The three-tier box-plot (§4.1) confirmed that bottom-tertile and top-tertile speed bands separate cleanly, but the Middle tier overlaps with both — directly motivating the binary modelling decision.
-
-**Objective 2 — Preprocess and derive the target.** A binary pace tier was constructed by cutting `average_speed` at its 33.3rd and 66.7th percentiles and keeping only the bottom (Slow) and top (Fast) thirds. The Middle tier was dropped because its members sit at the tertile boundary and are nearly indistinguishable from neighbours in the predictor space; an earlier three-class trial confirmed this empirically by plateauing at approximately 59% accuracy. A median-split alternative that would have retained all 92 runs was considered and rejected on the same grounds. `average_speed` and `max_speed` were excluded from the predictor set to prevent target leakage, and all remaining predictors were used on their raw scale because CART is scale-invariant.
-
-**Objective 3 — Build and evaluate the CART classifier.** The complexity parameter was tuned by 5 × 10 repeated cross-validation over the grid $cp \in \{0, 0.01, \ldots, 0.20\}$. The selected value was $cp = 0.20$ — the most aggressive pruning option in the grid. On the held-out test set (n = 18), CART achieved an accuracy of 0.889 (95% CI: 0.653 to 0.986), with sensitivity of 0.867 for the Fast class, specificity of 0.909 for the Slow class, and Cohen's $\kappa = 0.778$ — a value that falls in the "substantial" agreement band on the Landis–Koch scale.
-
-**Objective 4 — Interpret the decision rule.** The pruned tree contained a single split on `moving_time`. Variable-importance scores (moving_time = 100, rest_ratio = 33.8, distance = 9.9, total_elevation_gain = 0.0) confirmed that moving time alone carries nearly all of the binary-classification signal in this dataset. The result is intuitive: at the typical distances run by this athlete, longer moving times unambiguously imply slower pace. Distance, despite appearing in the pace formula, contributed marginal information that did not survive the CV-selected pruning threshold.
-
-**Hypothesis decision (§1.4).** The one-sided exact binomial test of CART test accuracy (0.889) against the No-Information Rate (0.500) returned $p \approx 6.6 \times 10^{-4}$. The null hypothesis that CART performs no better than a naïve majority-class baseline was therefore **rejected at $\alpha = 0.05$**. CART's predictions reflect real signal in the contextual telemetry, not class prevalence.
-
-**Overall takeaway.** Even on a single-athlete dataset of 92 runs, a one-split decision tree on `moving_time` can reliably distinguish bottom-tertile (Slow) from top-tertile (Fast) runs with 89% accuracy. The model's parsimony is itself a finding: pace is determined primarily by how long a run lasts at this athlete's typical distance range. CART's transparency — a single, human-readable threshold — makes the model a credible reference for any lightweight pace-tagging feature that needs to be both accurate and explainable.
-
-## 5.2 Recommendations
-
-**For self-tracking athletes.** Moving time is a stronger contextual signal of pace tier than any other variable captured by Strava in this study. Athletes monitoring their own training intensity can use moving time, in combination with their typical distance range, as a quick proxy for whether a session falls in their Slow or Fast pace band — no GPS-derived speed calculation required.
-
-**For fitness-application developers.** A one-rule decision tree on `moving_time` is sufficient to power an auto-tagging feature ("easy / tempo" labels) on small per-user datasets. The model fits in milliseconds, runs in constant time at inference, and produces a human-readable threshold that can be displayed to the user as the rationale for any auto-classification. CART therefore offers a defensible alternative to opaque deep models when both accuracy and explainability are required.
-
-**For future researchers.** Three extensions are particularly worth pursuing. *First*, expand the dataset across multiple athletes with diverse fitness profiles to test whether the dominance of `moving_time` generalises beyond one runner's pacing strategy. *Second*, incorporate physiological covariates (heart rate, cadence, perceived exertion) and environmental factors (weather, surface) that are absent from the current Strava export but are increasingly available from modern wearables; these would likely reduce the unexplained variance in pace. *Third*, explore real-time prediction by training on mid-run telemetry windows rather than completed sessions — a setting in which moving time accumulates dynamically and a tree-based classifier could provide live pace-band feedback to the runner.
-
-**Methodological caveat.** The binary class balance reported in this study is engineered by the quantile-based binning, not a natural property of the data. Care should be taken when generalising the 89% accuracy figure: the model is reliable for assigning *this athlete's* runs into their own bottom or top pace tertile, but does not validate a population-level "slow vs. fast" classifier. Any deployment beyond a personal training context should be re-validated on the target athlete's own data.
-
-# References
-
-*Use APA 7 format. Include the Strava export as a data source, and cite all R packages used:*
-
-Bullock, G., Stocks, J., Feakins, B., Alizadeh, Z., Arundale, A., & Kluzek, S. (2024). Comparing self-reported running distance and pace with a commercial fitness watch data: Reliability study. *JMIR Formative Research, 8*, e39211. https://doi.org/10.2196/39211
-
-Fuller, D., Colwell, E., Low, J., Orychock, K., Tobin, M. A., Simango, B., Buote, R., Van Heerden, D., Luan, H., Cullen, K., Slade, L., & Taylor, N. G. A. (2020). Reliability and validity of commercially available wearable devices for measuring steps, energy expenditure, and heart rate: Systematic review. *JMIR mHealth and uHealth, 8*(9), e18694. https://doi.org/10.2196/18694
-
-Kolnes, M. R., & Øvretveit, K. (2026). A mixed-methods analysis of motivational dynamics and Strava use in active club runners. *Behavioral Sciences, 16*(2), 224. https://doi.org/10.3390/bs16020224
-
-Kuure, O., Kähkönen, K., & Hekkala, R. (2026). The impact of social features and application design on user behavior and long-term engagement of Strava users. In *Proceedings of the 59th Hawaii International Conference on System Sciences* (pp. 3787–3796). https://hdl.handle.net/10125/111850
-
-```{r citations, echo=TRUE, eval=FALSE}
-citation("caret")
-citation("rpart")
-citation("pROC")
-citation("tidyverse")
-```
-
-*Also cite the 8–12 articles from Chapter 2.*
-
-# Appendices
-
-## Appendix A: Binary Pace Tier Derivation
-
-The binary target is derived as follows. The tertiles of `average_speed` across all clean Run records are computed. Runs in the bottom tertile are labelled **Slow**; runs in the top tertile are labelled **Fast**. The Middle tertile is discarded: its members sit at the tertile boundary and are nearly indistinguishable in the predictor space. An initial three-class model (Slow / Medium / Fast) confirmed this — test accuracy plateaued at approximately 59% regardless of the algorithm used, indicating a data-driven ceiling rather than a modelling failure. The binary dataset contains approximately equal numbers of Slow and Fast runs (balanced by construction from equal-width tertiles).
-
-## Appendix B: Full Code
-
-All analysis code is dumped below for reference. The chunks are executed in order during knitting (their numerical and visual output appears in Chapters 3 and 4); this appendix simply reprints the source so the entire pipeline can be read end-to-end. No external scripts are required — place `strava.csv` in the same directory as this `.Rmd` file and knit.
-
-```{r appendix-code, ref.label=setdiff(knitr::all_labels(), c("setup", "appendix-code", "citations")), echo=TRUE, eval=FALSE}
 ```
